@@ -4,7 +4,7 @@ import pytest
 from lxml import etree
 
 from conftest import DOC, build_epub
-from readalign.epub import annotate_document, load_epub, parse_content_document
+from readalign.epub import load_epub, parse_content_document
 from readalign.errors import DRMError, InputError
 
 ENCRYPTION = """<?xml version="1.0" encoding="UTF-8"?>
@@ -24,15 +24,13 @@ FONT_OBFUSCATION = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
-def annotate_all(package):
-    for index, doc in enumerate(package.docs):
-        doc.sentences = annotate_document(doc.tree, index)
+def sentences_of(package):
     return [sentence for doc in package.docs for sentence in doc.sentences]
 
 
 def test_loads_and_annotates(sample_epub):
     package = load_epub(sample_epub)
-    sentences = annotate_all(package)
+    sentences = sentences_of(package)
     assert [sentence.fragment_id for sentence in sentences[:3]] == ["ra-1-1", "ra-1-2", "ra-1-3"]
     assert sentences[1].text == "The ship left the harbour at dawn."
     assert package.title() == "A Test Voyage"
@@ -47,14 +45,14 @@ def test_annotation_loses_no_text(sample_epub):
         doc.zip_path: flatten(etree.fromstring(package.files[doc.zip_path]))
         for doc in package.docs
     }
-    annotate_all(package)
+    sentences_of(package)
     for doc in package.docs:
         assert flatten(doc.tree.getroot()) == before[doc.zip_path]
 
 
 def test_ids_are_stable_across_runs(sample_epub):
-    first = [sentence.fragment_id for sentence in annotate_all(load_epub(sample_epub))]
-    second = [sentence.fragment_id for sentence in annotate_all(load_epub(sample_epub))]
+    first = [sentence.fragment_id for sentence in sentences_of(load_epub(sample_epub))]
+    second = [sentence.fragment_id for sentence in sentences_of(load_epub(sample_epub))]
     assert first == second
 
 
@@ -63,12 +61,12 @@ def test_existing_ids_are_never_overwritten(tmp_path):
         str(tmp_path / "ids.epub"),
         chapters=[("One", '<p id="keep-me">A single sentence stands alone.</p>')],
     )
-    sentences = annotate_all(load_epub(path))
+    sentences = sentences_of(load_epub(path))
     assert [sentence.fragment_id for sentence in sentences] == ["keep-me"]
 
 
 def test_footnote_gets_its_epub_type(sample_epub):
-    sentences = annotate_all(load_epub(sample_epub))
+    sentences = sentences_of(load_epub(sample_epub))
     footnotes = [sentence for sentence in sentences if sentence.epub_type]
     assert len(footnotes) == 1
     assert footnotes[0].epub_type == "footnote"
@@ -76,7 +74,7 @@ def test_footnote_gets_its_epub_type(sample_epub):
 
 
 def test_noteref_marker_does_not_merge_sentences(sample_epub):
-    texts = [sentence.text for sentence in annotate_all(load_epub(sample_epub))]
+    texts = [sentence.text for sentence in sentences_of(load_epub(sample_epub))]
     assert "We sighted ice on the ninth day." in texts
     assert "The captain ordered the sails reefed." in texts
 
@@ -91,7 +89,7 @@ def test_document_lying_about_its_encoding_is_recovered(tmp_path):
         extra={"EPUB/chapter1.xhtml": document.encode("cp1252")},
     )
     package = load_epub(path)
-    sentences = annotate_all(package)
+    sentences = sentences_of(package)
     assert package.docs[0].reencoded_from == "cp1252"
     assert sentences[0].text == "The café was closed."
 
@@ -105,7 +103,7 @@ def test_declared_encoding_is_honoured(tmp_path):
         chapters=[("One", "<p>placeholder</p>")],
         extra={"EPUB/chapter1.xhtml": document.encode("cp1252")},
     )
-    assert annotate_all(load_epub(path))[0].text == "The café was closed."
+    assert sentences_of(load_epub(path))[0].text == "The café was closed."
 
 
 def test_broken_xml_is_parsed_in_recovery_mode():

@@ -4,18 +4,14 @@ import pytest
 
 from conftest import build_epub, make_tracks, speak
 from readalign.align import align, align_tokens
-from readalign.epub import annotate_document, load_epub
+from readalign.epub import load_epub
 from readalign.errors import AlignmentError
 
 
 def book(tmp_path, name="align.epub", chapters=None):
     path = build_epub(str(tmp_path / name), **({"chapters": chapters} if chapters else {}))
     package = load_epub(path)
-    sentences = []
-    for index, doc in enumerate(package.docs):
-        doc.sentences = annotate_document(doc.tree, index)
-        sentences.extend(doc.sentences)
-    return package, sentences
+    return package, [sentence for doc in package.docs for sentence in doc.sentences]
 
 
 def test_perfect_transcript_times_everything(tmp_path):

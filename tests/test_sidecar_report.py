@@ -4,17 +4,14 @@ import json
 
 from conftest import build_epub, make_tracks, speak
 from readalign.align import align
-from readalign.epub import annotate_document, load_epub
+from readalign.epub import load_epub
 from readalign.report import build_report, document_stats, format_summary
 from readalign.sidecar import build_align_json, build_vtt, vtt_timestamp, write_sidecars
 
 
 def prepared(tmp_path):
     package = load_epub(build_epub(str(tmp_path / "in.epub")))
-    sentences = []
-    for index, doc in enumerate(package.docs):
-        doc.sentences = annotate_document(doc.tree, index)
-        sentences.extend(doc.sentences)
+    sentences = [sentence for doc in package.docs for sentence in doc.sentences]
     words = speak(sentences)
     tracks = make_tracks([words[-1].end + 2.0])
     return package, align(sentences, words, tracks, log=lambda *_: None), tracks

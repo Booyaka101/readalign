@@ -11,7 +11,7 @@ from lxml import etree
 from conftest import build_epub, make_tracks, speak
 from readalign.align import align
 from readalign.cli import check_epub
-from readalign.epub import OPF_NS, annotate_document, load_epub
+from readalign.epub import OPF_NS, load_epub
 from readalign.package import ACTIVE_CLASS, build_output, ensure_mimetype, write_epub
 from readalign.smil import SMIL_NS
 
@@ -31,10 +31,7 @@ def silent_mp3(path, seconds):
 def aligned(tmp_path):
     """A real EPUB plus a real (silent) MP3, timed with a synthetic transcript."""
     package = load_epub(build_epub(str(tmp_path / "in.epub")))
-    sentences = []
-    for index, doc in enumerate(package.docs):
-        doc.sentences = annotate_document(doc.tree, index)
-        sentences.extend(doc.sentences)
+    sentences = [sentence for doc in package.docs for sentence in doc.sentences]
     words = speak(sentences)
     duration = words[-1].end + 2.0
     tracks = make_tracks([duration])

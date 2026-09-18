@@ -121,7 +121,7 @@ def _dry_run_plan(package, tracks, log) -> int:
 def run_build(args) -> int:
     from .align import align
     from .audio import decode_wav, discover_inputs, prepare_tracks, require_ffmpeg
-    from .epub import annotate_document, load_epub
+    from .epub import load_epub
     from .package import build_output, ensure_mimetype, write_epub
     from .report import build_report, document_stats, format_summary, write_report
 
@@ -141,8 +141,6 @@ def run_build(args) -> int:
     log(f"readalign {__version__}")
     log(f"reading {args.epub}")
     package = load_epub(args.epub)
-    for index, doc in enumerate(package.docs):
-        doc.sentences = annotate_document(doc.tree, index)
     sentences = [sentence for doc in package.docs for sentence in doc.sentences]
     if not sentences:
         raise InputError(

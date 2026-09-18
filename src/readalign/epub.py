@@ -297,7 +297,7 @@ def _load_documents(package: EpubPackage) -> None:
         if data is None:
             continue
         tree, recovered, encoding = parse_content_document(data, zip_path)
-        doc_index = len(package.docs) + 1
+        doc_index = len(package.docs)
         doc = ContentDoc(
             manifest_id=item_id,
             zip_path=zip_path,
@@ -458,7 +458,7 @@ def _rewrite_block(
     block: etree._Element,
     items: list[_Item],
     units: list[tuple[int, int]],
-    doc_index: int,
+    label: int,
     counter: int,
     taken: set[str],
 ) -> tuple[list[tuple[str, str]], int]:
@@ -470,7 +470,7 @@ def _rewrite_block(
         identifier = block.get("id")
         if not identifier:
             counter += 1
-            identifier = _unique_id(f"ra-{doc_index}-{counter}", taken)
+            identifier = _unique_id(f"ra-{label}-{counter}", taken)
             block.set("id", identifier)
         return [(identifier, joined[units[0][0]: units[0][1]])], counter
 
@@ -492,7 +492,7 @@ def _rewrite_block(
             sequence.append(single)
         else:
             counter += 1
-            identifier = _unique_id(f"ra-{doc_index}-{counter}", taken)
+            identifier = _unique_id(f"ra-{label}-{counter}", taken)
             span = etree.Element(f"{namespace}span")
             span.set("id", identifier)
             _fill(span, pieces)
@@ -506,7 +506,13 @@ def _rewrite_block(
 
 
 def annotate_document(tree: etree._ElementTree, doc_index: int) -> list[Sentence]:
-    """Split a content document into sentences and ensure each one has a fragment id."""
+    """Split a content document into sentences and ensure each one has a fragment id.
+
+    ``doc_index`` is the document's position in the spine, counted from zero, and is what
+    ``package.docs`` is indexed by. Generated ids count from one, so the first document's
+    sentences read ``ra-1-1`` rather than ``ra-0-1``.
+    """
+    label = doc_index + 1
     taken = element_ids(tree)
     root = tree.getroot()
     body = next((element for element in root.iter() if _local(element.tag) == "body"), root)
@@ -543,9 +549,9 @@ def annotate_document(tree: etree._ElementTree, doc_index: int) -> list[Sentence
             epub_type, container = skippable
             container_id = container.get("id")
             if not container_id:
-                container_id = _unique_id(f"ra-{doc_index}-group-{len(sentences) + 1}", taken)
+                container_id = _unique_id(f"ra-{label}-group-{len(sentences) + 1}", taken)
                 container.set("id", container_id)
-        produced, counter = _rewrite_block(block, items, units, doc_index, counter, taken)
+        produced, counter = _rewrite_block(block, items, units, label, counter, taken)
         for identifier, text in produced:
             words = text.split()
             if not words:
