@@ -27,12 +27,12 @@ Each line below was run on this machine and the output read, not assumed.
 
 ## Deferred, in rough order of usefulness
 
-1. **Skippability and escapability.** EPUB 3 Media Overlays lets a reading system skip page
-   numbers, footnotes and sidebars by wrapping them in a `seq` carrying the matching `epub:type`.
-   readalign writes one flat `seq` of `par` elements, so a reader cannot offer "skip footnotes".
-   This is the largest remaining gap against the spec and the one an accessibility reviewer would
-   raise first. It needs the SMIL builder to follow the XHTML's structural nesting rather than the
-   sentence list.
+1. **Escapability.** Skippability ships: footnotes, endnotes, page numbers, sidebars and
+   annotations already come out inside a `seq` carrying their `epub:type`, so "skip footnotes"
+   works. Escapability does not. Those `seq` elements are flat siblings under `body` rather than
+   mirroring the XHTML's nesting, so a reader cannot offer "escape this table" from three levels
+   in. It needs the SMIL builder to walk the document tree instead of the sentence list, and no
+   sample book here exercises it, which is why it was not attempted blind.
 2. **Audio outside the EPUB.** Every output embeds the audio, so a 7 hour book is a 200 MB file.
    A mode that writes the overlays against audio hrefs the user hosts, or a second EPUB with the
    audio stripped, would suit anyone syncing to a phone. Changes the packaging model, so it is a
@@ -52,8 +52,9 @@ Each line below was run on this machine and the output read, not assumed.
 
 ## Next steps
 
-1. Publish to PyPI: `python -m build` then `twine upload dist/*`. The name `readalign` was free at
-   the time of writing; check it again before the upload. The owner does this from the phone.
+1. Publish to PyPI: `python -m build` then `twine upload dist/*`. `https://pypi.org/pypi/readalign/json`
+   returned 404 on 2026-09-18, so the name is free; check it again just before the upload. The
+   owner does this from the phone.
 2. Create the GitHub repository `cbosch101/readalign` and push. The URLs in `pyproject.toml`
    already point there, so the PyPI page will link correctly once it exists.
 3. After publishing, confirm `pip install readalign` and `uvx readalign --version` work from a

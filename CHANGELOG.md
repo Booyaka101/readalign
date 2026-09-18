@@ -7,7 +7,9 @@ First release.
 - `readalign build` turns a DRM-free audiobook and the matching DRM-free EPUB into one EPUB 3
   with conformant Media Overlays: SMIL per content document, `media-overlay` on the manifest
   items, `media:duration` per overlay plus a total, active-class metadata and a highlight
-  stylesheet. The archive is written mimetype-first and uncompressed as OCF requires.
+  stylesheet. Footnotes, endnotes, page numbers, sidebars and annotations go inside a `seq`
+  carrying their `epub:type`, so a reading system can offer to skip them. The archive is
+  written mimetype-first and uncompressed as OCF requires.
 - `readalign check` validates the overlays in any EPUB: fragment ids resolve, audio is
   manifested, no `clipEnd` runs past the duration ffprobe reports, declared durations match the
   clips. `--json` for scripting.

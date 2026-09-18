@@ -187,8 +187,10 @@ written; exceeding the threshold only changes the exit code to 3 so a script can
 5. The XHTML is rewritten so each sentence is wrapped in `<span id="ra-1-7">`. Existing ids are
    never touched, and sentence boundaries that fall inside `<em>` or `<a>` are split without
    changing a character of the text.
-6. Overlays, manifest items and metadata go into the package document, and the archive is written
-   mimetype-first and uncompressed as OCF requires.
+6. Footnotes, endnotes, page numbers, sidebars and annotations are wrapped in a SMIL `seq`
+   carrying their `epub:type`, so a reading system that offers "skip footnotes" can.
+7. Overlays, manifest items and metadata go into the package document, and the archive is
+   written mimetype-first and uncompressed as OCF requires.
 
 ## Options
 
