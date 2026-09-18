@@ -18,7 +18,8 @@ First release.
   present but cannot load its CUDA libraries falls back to the CPU with one warning line
   naming what to install, rather than a traceback.
 - Anchored alignment: unique shared n-grams, longest increasing subsequence, diff only in the
-  gaps. No global dynamic-programming matrix, so a 20 hour book stays in a few hundred megabytes.
+  gaps. No global dynamic-programming matrix, and the audio is streamed into the archive rather
+  than buffered, so a 7.5 hour book peaks around 150 MB of memory.
 - Sidecars: one WebVTT per chapter and audio file, plus `align.json`. `readalign-report.json`
   records coverage, drift, per-document statistics and every region that did not match.
 - Handles one file spanning several chapters, several files in one chapter, audio chapter counts

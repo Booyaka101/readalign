@@ -18,12 +18,13 @@ Each line below was run on this machine and the output read, not assumed.
 | OCF packaging | `zipfile` one-liner from the brief passes on both outputs: `mimetype` first and `ZIP_STORED` |
 | `readalign check` | reports 18 and 3250 sentences, the same counts the two builds wrote; probes every `clipEnd` against ffprobe |
 | Reference title | `readalign check` on the epubtest.org Media Overlays book reports ok (gated behind `READALIGN_MO_TESTBOOK`) |
-| Test suite | `python -m pytest tests -q` -> 69 passed, 1 skipped |
+| Test suite | `python -m pytest tests -q` -> 69 passed, 1 skipped; with `READALIGN_MO_TESTBOOK` set, 70 passed |
 | Lint | `python -m ruff check .` -> All checks passed |
-| Clean install | wheel installed into an empty venv at `D:/tmp/readalign-cleaninstall`, then `--version`, `check` and a full `build` run from a directory outside the repo |
+| Clean install | wheel installed into an empty venv, then `--version`, a full `build` and a `check` run from a directory outside the repo. Repeated after the last source change |
 | CUDA fallback | that venv has no `cublas64_12.dll`; the build warns once, names the wheels to install, and finishes on the CPU with exit 0 |
 | Sidecar rerun | rebuilding Frankenstein over an older sidecar directory leaves exactly the 44 files it reports, with no leftovers from the previous track split |
-| Clone check | 138 functions compared pairwise with difflib; one pair at 0.57 (two report tests), nothing in `src/` above 0.50 |
+| Clone check | 167 functions compared pairwise with difflib, nested bodies excluded from their parent's span. Highest pair 0.47, both sides pytest fixtures in different modules. Nothing in `src/` above 0.45 |
+| Memory | Frankenstein peak working set 157.2 MB. Audio is streamed into the archive rather than held: before the change the same build peaked at 316.8 MB and produced a byte-identical file |
 
 ## Deferred, in rough order of usefulness
 
@@ -67,4 +68,4 @@ Each line below was run on this machine and the output read, not assumed.
   outside the repo on purpose: `scripts/fetch_samples.py long` rebuilds it in a few minutes.
 - The transcript cache lives in `%LOCALAPPDATA%/readalign/cache`. The 25 Frankenstein tracks are
   in it, so a rebuild of that book takes about 90 seconds instead of twelve minutes.
-- Two commits so far, on `master`, no remote.
+- Six commits so far, on `master`, no remote.
