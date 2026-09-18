@@ -27,5 +27,8 @@ First release.
   that disagree with the spine, narrator front and back matter with no text counterpart, notes
   and page-break markers, existing ids, non-UTF8 XHTML, and clip ends past the real duration.
 - DRM-protected input (`.aax`, `.aa`, `.acsm`, an encrypted EPUB) exits 2 and is never opened.
+- Wrong input gets one line and an exit code, never a traceback: a missing file, an unzipped
+  book passed as a directory, something that is not a zip, an EPUB 2 package, an empty audio
+  directory, or a file ffprobe cannot read.
 - Optional `readalign[refine]` extra adds a CTC forced-alignment pass behind `--refine`. The
   MMS-300m aligner it uses is CC BY-NC 4.0, so it is never downloaded by the default path.

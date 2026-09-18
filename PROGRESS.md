@@ -20,14 +20,15 @@ Each line below was run on this machine and the output read, not assumed.
 | OCF packaging | `zipfile` one-liner from the brief passes on both outputs: `mimetype` first and `ZIP_STORED` |
 | `readalign check` | reports 18 and 3250 sentences, the same counts the two builds wrote; probes every `clipEnd` against ffprobe |
 | Reference title | `readalign check` on the epubtest.org Media Overlays book reports ok (gated behind `READALIGN_MO_TESTBOOK`) |
-| Test suite | `python -m pytest tests -q` -> 79 passed, 1 skipped; with `READALIGN_MO_TESTBOOK` set, 80 passed |
+| Test suite | `python -m pytest tests -q` -> 81 passed, 1 skipped; with `READALIGN_MO_TESTBOOK` set, 82 passed |
 | Lint | `python -m ruff check .` -> All checks passed |
 | Clean install | wheel installed into an empty venv, then `--version`, a full `build` and a `check` run from a directory outside the repo. Repeated after the last source change |
 | CUDA fallback | that venv has no `cublas64_12.dll`; the build warns once, names the wheels to install, and finishes on the CPU with exit 0 |
 | Sidecar rerun | rebuilding Frankenstein over an older sidecar directory leaves exactly the 44 files it reports, with no leftovers from the previous track split |
-| Clone check | 188 functions compared pairwise with difflib, nested bodies excluded from their parent's span. No pair anywhere at or above 0.45 |
+| Clone check | 190 functions compared pairwise with difflib, nested bodies excluded from their parent's span. No pair anywhere at or above 0.45 |
 | Memory | Frankenstein build peak working set 129.9 MB, down from 316.8 MB before audio was streamed into the archive and 157.2 MB before untouched members were carried by reference. Opening the 205 MB result costs 33.5 MB, down from 238.7 MB; `check` on it costs 38.7 MB, down from 58.4 MB. Every step was proved byte-identical on the way |
 | Reproducible output | three separate builds of Frankenstein from the same inputs all hash to `f1f185f2...d639c`; the Aesop example hashes to `d998e692...3f98` across every refactor in this pass |
+| Bad input | twelve wrong-input paths run against the installed wheel: missing file, a directory, a non-zip, an EPUB 2 package, an `.acsm`, a book with an AES `encryption.xml`, a missing or empty audio directory and a file ffprobe rejects. Each gives one line and exits 1, or 2 for DRM. No traceback reaches the user |
 | Escapability | tables, rows, cells, lists, list items and figures come out as nested `seq` elements mirroring the XHTML, and epubcheck 5.2.1 accepts the `epub:type` values it sees on them |
 
 ## Deferred, in rough order of usefulness

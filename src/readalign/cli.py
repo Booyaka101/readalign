@@ -19,6 +19,7 @@ from urllib.parse import unquote
 
 from . import __version__
 from .errors import InputError, ReadAlignError
+from .members import open_archive
 
 DEFAULT_MODEL = "large-v3-turbo"
 DEFAULT_DRIFT = 2.5
@@ -355,14 +356,7 @@ def check_epub(path: str, *, probe_audio: bool = True) -> dict:
 
     errors: list[str] = []
     warnings: list[str] = []
-    if not os.path.exists(path):
-        raise InputError(f"no such file: {path}")
-    try:
-        archive = zipfile.ZipFile(path)
-    except zipfile.BadZipFile as exc:
-        raise InputError(f"{path} is not a readable EPUB (not a zip archive): {exc}") from exc
-
-    with archive:
+    with open_archive(path) as archive:
         names = set(archive.namelist())
         entries = archive.infolist()
         if not entries or entries[0].filename != "mimetype":

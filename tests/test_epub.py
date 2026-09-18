@@ -4,6 +4,7 @@ import pytest
 from lxml import etree
 
 from conftest import DOC, STRUCTURED, build_epub
+from readalign.cli import check_epub
 from readalign.epub import element_ids, load_epub, local_name, parse_content_document
 from readalign.errors import DRMError, InputError
 
@@ -142,6 +143,16 @@ def test_not_a_zip_is_a_clean_error(tmp_path):
     path.write_text("this is not an epub", encoding="utf-8")
     with pytest.raises(InputError):
         load_epub(str(path))
+
+
+@pytest.mark.parametrize("entry_point", [load_epub, check_epub])
+def test_a_directory_is_a_clean_error(tmp_path, entry_point):
+    """An unzipped book is an easy mistake, and it must not reach the user as a traceback."""
+    unzipped = tmp_path / "unzipped.epub"
+    unzipped.mkdir()
+    with pytest.raises(InputError) as info:
+        entry_point(str(unzipped))
+    assert "directory" in str(info.value)
 
 
 def test_epub_2_is_refused_with_a_hint(tmp_path):

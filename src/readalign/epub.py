@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from lxml import etree
 
 from .errors import DRMError, InputError
-from .members import ArchiveMember, Member
+from .members import ArchiveMember, Member, open_archive
 from .sentences import split_sentences
 
 XHTML_NS = "http://www.w3.org/1999/xhtml"
@@ -232,17 +232,12 @@ def load_epub(path: str) -> EpubPackage:
     """Load an EPUB 3 package and annotate every XHTML document in its spine."""
     if path.lower().endswith(".acsm"):
         raise DRMError("readalign does not handle DRM-protected files")
-    try:
-        with zipfile.ZipFile(path) as archive:
+    with open_archive(path) as archive:
+        try:
             return _load_open(path, archive)
-    except FileNotFoundError:
-        raise InputError(f"epub not found: {path}") from None
-    except IsADirectoryError:
-        raise InputError(f"--epub must be an .epub file, not a directory: {path}") from None
-    except zipfile.BadZipFile:
-        raise InputError(f"not a readable EPUB (the file is not a zip archive): {path}") from None
-    except PermissionError:
-        raise InputError(f"cannot read {path}: permission denied") from None
+        except zipfile.BadZipFile as exc:
+            # A corrupt member survives the central directory and only fails on read.
+            raise InputError(f"{path} is not a readable EPUB: {exc}") from None
 
 
 def _load_open(path: str, archive: zipfile.ZipFile) -> EpubPackage:

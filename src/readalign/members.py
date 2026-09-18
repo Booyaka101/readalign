@@ -7,10 +7,13 @@ the output rather than held as bytes.
 
 from __future__ import annotations
 
+import os
 import zipfile
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import BinaryIO
+
+from .errors import InputError
 
 
 @dataclass(frozen=True)
@@ -31,6 +34,22 @@ class ArchiveMember:
 #: An output archive as member name to content.
 Member = dict[str, "bytes | SourceFile | ArchiveMember"]
 
+
+def open_archive(path: str) -> zipfile.ZipFile:
+    """Open an EPUB for reading, turning every unreadable-path case into a clear message."""
+    try:
+        return zipfile.ZipFile(path)
+    except FileNotFoundError:
+        raise InputError(f"no such file: {path}") from None
+    except (IsADirectoryError, PermissionError) as exc:
+        # Windows raises PermissionError for a directory, where POSIX raises IsADirectoryError.
+        if os.path.isdir(path):
+            raise InputError(f"not an .epub file but a directory: {path}") from None
+        raise InputError(f"cannot read {path}: {exc.strerror or exc}") from None
+    except zipfile.BadZipFile as exc:
+        raise InputError(f"{path} is not a readable EPUB (not a zip archive): {exc}") from None
+    except OSError as exc:
+        raise InputError(f"cannot read {path}: {exc.strerror or exc}") from None
 
 class MemberReader(AbstractContextManager):
     """Opens by-reference members, holding each source archive open only once."""
