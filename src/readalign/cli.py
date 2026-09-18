@@ -314,15 +314,11 @@ def _overlay_durations(
 
 
 def _fragment_ids(archive, doc_path: str, cache: dict[str, set[str]]) -> set[str]:
-    from .epub import parse_content_document
+    from .epub import element_ids, parse_content_document
 
     if doc_path not in cache:
         tree, _, _ = parse_content_document(archive.read(doc_path), doc_path)
-        cache[doc_path] = {
-            element.get("id")
-            for element in tree.getroot().iter()
-            if isinstance(element.tag, str) and element.get("id")
-        }
+        cache[doc_path] = element_ids(tree)
     return cache[doc_path]
 
 

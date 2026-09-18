@@ -384,7 +384,8 @@ def _snap_to_elements(boundaries: list[int], items: list[_Item]) -> list[int]:
     return snapped
 
 
-def _existing_ids(tree: etree._ElementTree) -> set[str]:
+def element_ids(tree: etree._ElementTree) -> set[str]:
+    """Every id already in a content document, so generated ones never collide with them."""
     return {
         element.get("id")
         for element in tree.getroot().iter()
@@ -506,7 +507,7 @@ def _rewrite_block(
 
 def annotate_document(tree: etree._ElementTree, doc_index: int) -> list[Sentence]:
     """Split a content document into sentences and ensure each one has a fragment id."""
-    taken = _existing_ids(tree)
+    taken = element_ids(tree)
     root = tree.getroot()
     body = next((element for element in root.iter() if _local(element.tag) == "body"), root)
     sentences: list[Sentence] = []
