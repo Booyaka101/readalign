@@ -7,9 +7,9 @@ First release.
 - `readalign build` turns a DRM-free audiobook and the matching DRM-free EPUB into one EPUB 3
   with conformant Media Overlays: SMIL per content document, `media-overlay` on the manifest
   items, `media:duration` per overlay plus a total, active-class metadata and a highlight
-  stylesheet. Footnotes, endnotes, page numbers, sidebars and annotations go inside a `seq`
-  carrying their `epub:type`, so a reading system can offer to skip them. The archive is
-  written mimetype-first and uncompressed as OCF requires.
+  stylesheet. The overlay's `seq` elements mirror the document's nesting, so both skippability
+  (footnotes, endnotes, page numbers, sidebars, annotations) and escapability (tables, lists,
+  figures) work. The archive is written mimetype-first and uncompressed as OCF requires.
 - `readalign check` validates the overlays in any EPUB: fragment ids resolve, audio is
   manifested, no `clipEnd` runs past the duration ffprobe reports, declared durations match the
   clips. `--json` for scripting.
@@ -18,8 +18,9 @@ First release.
   present but cannot load its CUDA libraries falls back to the CPU with one warning line
   naming what to install, rather than a traceback.
 - Anchored alignment: unique shared n-grams, longest increasing subsequence, diff only in the
-  gaps. No global dynamic-programming matrix, and the audio is streamed into the archive rather
-  than buffered, so a 7.5 hour book peaks around 150 MB of memory.
+  gaps. No global dynamic-programming matrix, and audio is streamed rather than buffered on the
+  way both in and out, so a 7.5 hour book builds in about 130 MB of memory and opening the
+  205 MB result costs 33 MB. Two runs of the same build produce byte-identical archives.
 - Sidecars: one WebVTT per chapter and audio file, plus `align.json`. `readalign-report.json`
   records coverage, drift, per-document statistics and every region that did not match.
 - Handles one file spanning several chapters, several files in one chapter, audio chapter counts
