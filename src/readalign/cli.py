@@ -329,8 +329,8 @@ def _probe_clip_ends(archive, max_clip_end: dict[str, float], errors: list[str],
     with tempfile.TemporaryDirectory(prefix="readalign-check-") as scratch:
         for audio_path, clip_end in sorted(max_clip_end.items()):
             extracted = os.path.join(scratch, posixpath.basename(audio_path))
-            with open(extracted, "wb") as handle:
-                handle.write(archive.read(audio_path))
+            with archive.open(audio_path) as source, open(extracted, "wb") as handle:
+                shutil.copyfileobj(source, handle, 1 << 20)
             try:
                 duration = float(ffprobe(extracted)["format"]["duration"])
             except (ReadAlignError, KeyError, ValueError, TypeError) as exc:
