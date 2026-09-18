@@ -11,7 +11,6 @@ import os
 import posixpath
 import shutil
 import zipfile
-from dataclasses import dataclass
 from urllib.parse import unquote
 
 from lxml import etree
@@ -22,11 +21,8 @@ from .clock import format_clock
 from .epub import OPF_NS, EpubPackage, local_name
 from .errors import InputError
 from .fs import ensure_directory
+from .members import Member, MemberReader, SourceFile
 from .smil import build_smil, overlay_duration
-
-#: The output archive as member name to content: bytes for everything readalign builds,
-#: a SourceFile for anything already on disk that is too big to hold.
-Member = dict[str, "bytes | SourceFile"]
 
 AUDIO_DIR = "audio"
 OVERLAY_DIR = "media-overlays"
@@ -162,17 +158,6 @@ def _inject_stylesheet(
         link.set("href", posixpath.relpath(css_path, posixpath.dirname(doc.zip_path)))
 
 
-@dataclass(frozen=True)
-class SourceFile:
-    """An archive member whose bytes stay on disk until the zip is written.
-
-    An audiobook is the largest thing in the output by three orders of magnitude, so it is
-    streamed in rather than held in the member map like everything else.
-    """
-
-    path: str
-
-
 def build_output(
     package: EpubPackage,
     entries_by_doc: dict[str, list[TimedSentence]],
@@ -271,7 +256,7 @@ def write_epub(path: str, files: Member, original_order: list[str]) -> None:
     ensure_directory(os.path.dirname(os.path.abspath(path)))
 
     try:
-        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive, MemberReader() as read:
             for name in ordered:
                 data = files[name]
                 if name == "mimetype":
@@ -288,14 +273,15 @@ def write_epub(path: str, files: Member, original_order: list[str]) -> None:
                     if posixpath.splitext(name)[1].lower() in _MEDIA_TYPES_BY_SUFFIX
                     else zipfile.ZIP_DEFLATED
                 )
-                if isinstance(data, SourceFile):
-                    with open(data.path, "rb") as source, archive.open(info, "w") as target:
-                        shutil.copyfileobj(source, target, 1 << 20)
-                else:
+                if isinstance(data, bytes):
                     archive.writestr(info, data)
+                else:
+                    with read.open(data) as source, archive.open(info, "w") as target:
+                        shutil.copyfileobj(source, target, 1 << 20)
     except OSError as exc:
         raise InputError(f"cannot write {path}: {exc}") from exc
 
 
 def ensure_mimetype(files: Member) -> None:
-    files.setdefault("mimetype", b"application/epub+zip")
+    """Set the OCF mimetype. It is fixed for EPUB, so the input's copy is never carried over."""
+    files["mimetype"] = b"application/epub+zip"

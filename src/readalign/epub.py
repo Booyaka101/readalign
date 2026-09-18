@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from lxml import etree
 
 from .errors import DRMError, InputError
+from .members import ArchiveMember, Member
 from .sentences import split_sentences
 
 XHTML_NS = "http://www.w3.org/1999/xhtml"
@@ -108,7 +109,9 @@ class ManifestItem:
 @dataclass
 class EpubPackage:
     source: str
-    files: dict[str, bytes]
+    #: Every member of the input archive. Parsed ones hold bytes; the rest, which includes any
+    #: audio a previous run embedded, are references copied through at write time.
+    files: Member
     order: list[str]
     opf_path: str
     opf_tree: etree._ElementTree
@@ -210,8 +213,7 @@ def load_epub(path: str) -> EpubPackage:
         raise DRMError("readalign does not handle DRM-protected files")
     try:
         with zipfile.ZipFile(path) as archive:
-            order = archive.namelist()
-            files = {name: archive.read(name) for name in order if not name.endswith("/")}
+            return _load_open(path, archive)
     except FileNotFoundError:
         raise InputError(f"epub not found: {path}") from None
     except IsADirectoryError:
@@ -220,6 +222,16 @@ def load_epub(path: str) -> EpubPackage:
         raise InputError(f"not a readable EPUB (the file is not a zip archive): {path}") from None
     except PermissionError:
         raise InputError(f"cannot read {path}: permission denied") from None
+
+
+def _load_open(path: str, archive: zipfile.ZipFile) -> EpubPackage:
+    order = archive.namelist()
+    files: Member = {
+        name: ArchiveMember(path, name) for name in order if not name.endswith("/")
+    }
+    for name in files:
+        if name.startswith("META-INF/"):
+            files[name] = archive.read(name)
 
     _check_drm(files)
 
@@ -241,6 +253,7 @@ def load_epub(path: str) -> EpubPackage:
         raise InputError("META-INF/container.xml names no package document")
     if opf_path not in files:
         raise InputError(f"package document {opf_path} is missing from the archive")
+    files[opf_path] = archive.read(opf_path)
 
     opf_tree = _parse_xml(files[opf_path], opf_path)
     root = opf_tree.getroot()
@@ -282,21 +295,22 @@ def load_epub(path: str) -> EpubPackage:
         spine_ids=spine_ids,
         docs=[],
     )
-    _load_documents(package)
+    _load_documents(package, archive)
     if not package.docs:
         raise InputError(f"{path} has no XHTML content documents in its spine")
     return package
 
 
-def _load_documents(package: EpubPackage) -> None:
+def _load_documents(package: EpubPackage, archive: zipfile.ZipFile) -> None:
     for item_id in package.spine_ids:
         item = package.manifest.get(item_id)
         if item is None or item.media_type != "application/xhtml+xml":
             continue
         zip_path = package.resolve(item.href)
-        data = package.files.get(zip_path)
-        if data is None:
+        if zip_path not in package.files:
             continue
+        data = archive.read(zip_path)
+        package.files[zip_path] = data
         tree, recovered, encoding = parse_content_document(data, zip_path)
         doc_index = len(package.docs)
         doc = ContentDoc(
