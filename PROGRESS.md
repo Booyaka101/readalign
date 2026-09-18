@@ -52,14 +52,14 @@ Each line below was run on this machine and the output read, not assumed.
 
 ## Next steps
 
-1. Publish to PyPI: `python -m build` then `twine upload dist/*`. `https://pypi.org/pypi/readalign/json`
-   returned 404 on 2026-09-18, so the name is free; check it again just before the upload. The
-   owner does this from the phone.
-2. Create the GitHub repository `Booyaka101/readalign` and push. The URLs in `pyproject.toml`
-   already point there, so the PyPI page will link correctly once it exists.
-3. After publishing, confirm `pip install readalign` and `uvx readalign --version` work from a
+1. Publish to PyPI: `twine upload dist/*`, using the artefacts attached to the v1.0.0 release
+   rather than a fresh build, since those are the ones that were verified.
+   `https://pypi.org/pypi/readalign/json` returned 404 on 2026-09-18, so the name is free; check
+   it again just before the upload. A version number on PyPI cannot be reused, so a mistake means
+   1.0.1 rather than a re-upload. The owner does this from the phone.
+2. After publishing, confirm `pip install readalign` and `uvx readalign --version` work from a
    machine that has never seen the source.
-4. Announce wherever audiobook and accessibility people are, with the Frankenstein numbers.
+3. Announce wherever audiobook and accessibility people are, with the Frankenstein numbers.
 
 ## Working notes
 
@@ -67,4 +67,9 @@ Each line below was run on this machine and the output read, not assumed.
   outside the repo on purpose: `scripts/fetch_samples.py long` rebuilds it in a few minutes.
 - The transcript cache lives in `%LOCALAPPDATA%/readalign/cache`. The 25 Frankenstein tracks are
   in it, so a rebuild of that book takes about 90 seconds instead of twelve minutes.
-- Fifteen commits so far, on `master`, no remote.
+- Twenty commits on `main` at <https://github.com/Booyaka101/readalign>. v1.0.0 is tagged at
+  `3d4884a` and released there with both artefacts attached. CI runs ruff and the suite on Linux
+  3.11, Linux 3.12 and Windows; Windows is in the matrix because `zipfile` reports a directory as
+  `PermissionError` there and `IsADirectoryError` everywhere else.
+- CI shows 81 passed 1 skipped. The skip is the epubtest.org Media Overlays book, which needs
+  `READALIGN_MO_TESTBOOK`; locally with it set the count is 82 passed.
