@@ -1,4 +1,6 @@
-"""The recogniser's device handling: a broken CUDA install must not end in a traceback."""
+"""The recogniser: device handling when CUDA is broken, and the transcript cache."""
+
+import json
 
 import pytest
 
@@ -58,3 +60,68 @@ def test_a_failure_that_is_not_cuda_is_not_retried(monkeypatch):
         asr.transcribe_tracks(
             make_tracks([10.0]), model_name="tiny", device="auto", log=lambda *_: None
         )
+
+
+def recogniser(monkeypatch, detected="en"):
+    """Stand in for the model: one word per track, latching a detected language as the real one."""
+
+    def transcribe(model, track, count, settings, **_):
+        settings.language = settings.language or detected
+        return [asr.Word("hello", 0.0, 0.4, 0.9)]
+
+    monkeypatch.setattr(asr, "pick_device", lambda requested: ("cpu", "int8"))
+    monkeypatch.setattr(asr, "load_model", lambda *a: object())
+    monkeypatch.setattr(asr, "_transcribe_track", transcribe)
+
+
+def one_track(tmp_path):
+    tracks = make_tracks([10.0])
+    audio = tmp_path / "part001.mp3"
+    audio.write_bytes(b"not really an mp3, but it has to have a size")
+    tracks[0].path = str(audio)
+    return tracks
+
+
+def run(tracks, cache):
+    return asr.transcribe_tracks(
+        tracks, model_name="tiny", device="auto", cache_dir=str(cache), log=lambda *_: None
+    )
+
+
+def test_a_cached_run_reports_the_language_the_first_run_detected(monkeypatch, tmp_path):
+    """The report's asr.language must not go null just because nothing needed transcribing."""
+    recogniser(monkeypatch)
+    tracks = one_track(tmp_path)
+    cache = tmp_path / "cache"
+    _, first = run(tracks, cache)
+    assert (first["cached_tracks"], first["language"]) == (0, "en")
+    words, second = run(tracks, cache)
+    assert (second["cached_tracks"], second["language"]) == (1, "en")
+    assert [word.text for word in words] == ["hello"]
+
+
+def _written_before_languages(data):
+    """A cache from an older readalign: a bare list of words with no language beside them."""
+    return data["words"]
+
+
+def _unreadable(data):
+    """An entry whose words no longer match the fields Word takes."""
+    return {"words": [{"nope": 1}]}
+
+
+@pytest.mark.parametrize(
+    ("mangle", "cached_tracks"), [(_written_before_languages, 1), (_unreadable, 0)]
+)
+def test_a_cache_entry_that_is_old_or_broken(monkeypatch, tmp_path, mangle, cached_tracks):
+    """An older entry still reads; an unreadable one is transcribed again rather than raising."""
+    recogniser(monkeypatch)
+    tracks = one_track(tmp_path)
+    cache = tmp_path / "cache"
+    run(tracks, cache)
+    entry = next(iter(cache.glob("*.json")))
+    entry.write_text(json.dumps(mangle(json.loads(entry.read_text()))), encoding="utf-8")
+    words, info = run(tracks, cache)
+    assert info["cached_tracks"] == cached_tracks
+    assert [word.text for word in words] == ["hello"]
+    assert info["language"] == (None if cached_tracks else "en")

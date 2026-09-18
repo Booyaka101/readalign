@@ -158,7 +158,8 @@ def _cache_key(track: AudioTrack, model: str, language: str | None, vad: bool) -
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:20]
 
 
-def _load_cached(cache_dir: str | None, key: str) -> list[Word] | None:
+def _load_cached(cache_dir: str | None, key: str) -> tuple[list[Word], str | None] | None:
+    """The words and the language of a cached track, or None if there is nothing usable."""
     if not cache_dir:
         return None
     path = os.path.join(cache_dir, f"{key}.json")
@@ -167,17 +168,25 @@ def _load_cached(cache_dir: str | None, key: str) -> list[Word] | None:
             data = json.load(handle)
     except (OSError, json.JSONDecodeError):
         return None
-    return [Word(**entry) for entry in data]
+    try:
+        # Caches written before the language was recorded are a bare list of words.
+        if isinstance(data, list):
+            return [Word(**entry) for entry in data], None
+        return [Word(**entry) for entry in data["words"]], data.get("language")
+    except (KeyError, TypeError):
+        return None
 
 
-def _store_cached(cache_dir: str | None, key: str, words: list[Word]) -> None:
+def _store_cached(
+    cache_dir: str | None, key: str, words: list[Word], language: str | None
+) -> None:
     if not cache_dir:
         return
     try:
         os.makedirs(cache_dir, exist_ok=True)
         path = os.path.join(cache_dir, f"{key}.json")
         with open(path, "w", encoding="utf-8") as handle:
-            json.dump([asdict(word) for word in words], handle)
+            json.dump({"language": language, "words": [asdict(w) for w in words]}, handle)
     except OSError as exc:
         print(f"  warning: could not write the transcript cache: {exc}", file=sys.stderr)
 
@@ -210,11 +219,13 @@ def transcribe_tracks(
         key = _cache_key(track, model_name, language, vad) if cache_dir else ""
         cached = _load_cached(cache_dir, key)
         if cached is not None:
+            cached_words, cached_language = cached
             log(f"  [{track.index}/{len(tracks)}] {os.path.basename(track.source)}: "
-                f"{len(cached)} words from cache")
+                f"{len(cached_words)} words from cache")
+            settings.language = settings.language or cached_language
             words.extend(
                 Word(w.text, w.start + track.offset, w.end + track.offset, w.probability)
-                for w in cached
+                for w in cached_words
             )
             info["cached_tracks"] += 1
             done += track.duration
@@ -245,7 +256,7 @@ def transcribe_tracks(
                 resolved_device, compute_type = "cpu", "int8"
                 info["device"], info["compute_type"] = resolved_device, compute_type
                 info["cuda_fallback"] = str(exc)
-        _store_cached(cache_dir, key, track_words)
+        _store_cached(cache_dir, key, track_words, settings.language)
         words.extend(
             Word(w.text, w.start + track.offset, w.end + track.offset, w.probability)
             for w in track_words
