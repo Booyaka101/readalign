@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import os
 import posixpath
+import shutil
 import zipfile
+from dataclasses import dataclass
 
 from lxml import etree
 
@@ -20,6 +22,10 @@ from .epub import OPF_NS, EpubPackage
 from .errors import InputError
 from .fs import ensure_directory
 from .smil import build_smil, overlay_duration
+
+#: The output archive as member name to content: bytes for everything readalign builds,
+#: a SourceFile for anything already on disk that is too big to hold.
+Member = dict[str, "bytes | SourceFile"]
 
 AUDIO_DIR = "audio"
 OVERLAY_DIR = "media-overlays"
@@ -125,13 +131,24 @@ def _inject_stylesheet(
         link.set("href", posixpath.relpath(css_path, posixpath.dirname(doc.zip_path)))
 
 
+@dataclass(frozen=True)
+class SourceFile:
+    """An archive member whose bytes stay on disk until the zip is written.
+
+    An audiobook is the largest thing in the output by three orders of magnitude, so it is
+    streamed in rather than held in the member map like everything else.
+    """
+
+    path: str
+
+
 def build_output(
     package: EpubPackage,
     entries_by_doc: dict[str, list[TimedSentence]],
     tracks: list[AudioTrack],
     *,
     narrator: str | None = None,
-) -> tuple[dict[str, bytes], dict]:
+) -> tuple[Member, dict]:
     """Produce the member-name-to-bytes map of the output EPUB, and a summary of what changed."""
     manifest = _manifest_element(package)
     metadata = _metadata_element(package)
@@ -144,7 +161,7 @@ def build_output(
     )
     audio_paths: dict[int, str] = {}
     audio_hrefs: dict[int, str] = {}
-    files: dict[str, bytes] = {
+    files: Member = {
         name: data for name, data in package.files.items() if name not in replaced
     }
 
@@ -155,8 +172,7 @@ def build_output(
         zip_path = package.resolve(href)
         audio_paths[index] = zip_path
         audio_hrefs[index] = href
-        with open(track.path, "rb") as handle:
-            files[zip_path] = handle.read()
+        files[zip_path] = SourceFile(track.path)
         _add_manifest_item(
             package,
             manifest,
@@ -211,7 +227,7 @@ def build_output(
     return files, summary
 
 
-def write_epub(path: str, files: dict[str, bytes], original_order: list[str]) -> None:
+def write_epub(path: str, files: Member, original_order: list[str]) -> None:
     """Write an OCF archive: mimetype first and stored, everything else deflated."""
     ordered: list[str] = []
     seen = set()
@@ -234,17 +250,21 @@ def write_epub(path: str, files: dict[str, bytes], original_order: list[str]) ->
                     info.external_attr = 0o644 << 16
                     archive.writestr(info, data)
                     continue
-                compression = (
+                info = zipfile.ZipInfo(name)
+                info.external_attr = 0o644 << 16
+                info.compress_type = (
                     zipfile.ZIP_STORED
                     if posixpath.splitext(name)[1].lower() in _MEDIA_TYPES_BY_SUFFIX
                     else zipfile.ZIP_DEFLATED
                 )
-                info = zipfile.ZipInfo(name)
-                info.external_attr = 0o644 << 16
-                archive.writestr(info, data, compress_type=compression)
+                if isinstance(data, SourceFile):
+                    with open(data.path, "rb") as source, archive.open(info, "w") as target:
+                        shutil.copyfileobj(source, target, 1 << 20)
+                else:
+                    archive.writestr(info, data)
     except OSError as exc:
         raise InputError(f"cannot write {path}: {exc}") from exc
 
 
-def ensure_mimetype(files: dict[str, bytes]) -> None:
+def ensure_mimetype(files: Member) -> None:
     files.setdefault("mimetype", b"application/epub+zip")
