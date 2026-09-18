@@ -19,7 +19,9 @@ readalign build --audio audiobook/ --epub book.epub --out read-along.epub
 - **`readalign-report.json`** next to the output: coverage, drift, per-document statistics, which
   documents got no overlay and which regions never matched.
 - **sidecars** (`<name>-sidecars/`): one WebVTT file per chapter and audio file, plus `align.json`
-  with every sentence's id, clip times, confidence and text. Turn them off with `--no-sidecars`.
+  with every sentence's id, clip times, confidence and text. A rerun clears the `.vtt` files and
+  `align.json` it wrote last time, so nothing stale is left behind. Turn them off with
+  `--no-sidecars`.
 
 ## Requirements
 
@@ -27,7 +29,8 @@ readalign build --audio audiobook/ --epub book.epub --out read-along.epub
 - **ffmpeg and ffprobe on `PATH`** (readalign shells out to them; it does not vendor a copy).
   Get them from <https://ffmpeg.org/download.html>.
 - An NVIDIA GPU is optional. With one, a 7 hour book transcribes in about 12 minutes. On CPU the
-  same book takes hours, so use a smaller `--model` there.
+  same book takes hours, so use a smaller `--model` there. If a GPU is present but its CUDA
+  libraries will not load, readalign says so and carries on on the CPU.
 
 ## Install
 
@@ -50,10 +53,11 @@ matching Project Gutenberg text. From a checkout:
 readalign build \
     --audio examples/aesop/aesop-section-37.mp3 \
     --epub examples/aesop/aesop-two-fables.epub \
-    --out aligned.epub --model tiny.en --language en
+    --out aligned.epub --model tiny.en --language en --device cpu
 ```
 
-Real output from that command:
+Two minutes of audio is not worth spinning up a GPU for, hence `--device cpu`. Real output
+from that command, on a cold cache:
 
 ```
 readalign 1.0.0
@@ -64,18 +68,20 @@ preparing 1 audio file(s)
 transcribing
   loading whisper model 'tiny.en' on cpu (int8)
   [1/1] aesop-section-37.mp3: transcribing 1:58
-      298 words so far, 1:58/1:58 audio in 0:04 (29.5x realtime)
-  298 words in 4.0s on cpu
+      298 words so far, 1:58/1:58 audio in 0:03 (35.8x realtime)
+  298 words in 3.3s on cpu
 aligning
   aligning 245 book tokens against 300 spoken tokens
-wrote aligned.epub (0.9 MB, 2 overlays, 0:01:11.640)
-wrote 3 sidecar file(s) to aligned-sidecars
+wrote D:\Repos\ideas\readalign\aligned.epub (0.9 MB, 2 overlays, 0:01:11.640)
+wrote 3 sidecar file(s) to D:\Repos\ideas\readalign\aligned-sidecars
   sentences      18/18 timed (100.0%)
   interpolated   0   low confidence 0
   token match    95.1%
   drift          max 0.00s, p95 0.00s, threshold 2.50s
-  report         readalign-report.json
+  report         D:\Repos\ideas\readalign\readalign-report.json
 ```
+
+Run it again and the transcribing lines become `298 words from cache`.
 
 The recording opens and closes with the LibriVox announcement, which has no counterpart in the
 text. readalign trims it: the first overlay starts at 20.5 seconds.
@@ -91,7 +97,7 @@ python scripts/fetch_samples.py long     # Frankenstein, 7.5 hours over 25 files
 
 ```
 $ readalign check aligned.epub
-checking aligned.epub
+checking D:\Repos\ideas\readalign\aligned.epub
   overlays       2
   sentences      18
   clip time      0.02 hours

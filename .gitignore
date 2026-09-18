@@ -11,7 +11,6 @@ venv/
 .coverage
 htmlcov/
 *.epub
-!tests/fixtures/*.epub
 !examples/aesop/*.epub
 readalign-report.json
 *-sidecars/

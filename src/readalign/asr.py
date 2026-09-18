@@ -91,6 +91,64 @@ def load_model(name: str, device: str, compute_type: str):
         raise DependencyError(f"could not load the '{name}' model: {message}") from exc
 
 
+CUDA_HINT = (
+    "install the CUDA runtime wheels with "
+    "'pip install nvidia-cublas-cu12 nvidia-cudnn-cu12', or use --device cpu"
+)
+
+
+def _is_cuda_failure(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(token in message for token in ("cuda", "cublas", "cudnn", "gpu"))
+
+
+@dataclass
+class _Settings:
+    """The recogniser knobs, carried together so the per-track call stays readable."""
+
+    model_name: str
+    language: str | None
+    vad: bool
+    beam_size: int
+    window_seconds: float
+
+
+def _transcribe_track(model, track, count, settings, *, before, total, started, log) -> list[Word]:
+    """Transcribe one track, in windows, returning words relative to the start of that track."""
+    from .audio import plan_windows
+
+    words: list[Word] = []
+    windows = plan_windows(track, settings.window_seconds)
+    for window_index, (start, end) in enumerate(windows, start=1):
+        audio = read_wav_segment(track.wav_path, start, end)
+        suffix = f" window {window_index}/{len(windows)}" if len(windows) > 1 else ""
+        log(f"  [{track.index}/{count}] {os.path.basename(track.source)}{suffix}: "
+            f"transcribing {_hms(end - start)}")
+        segments, detected = model.transcribe(
+            audio,
+            language=settings.language,
+            word_timestamps=True,
+            vad_filter=settings.vad,
+            beam_size=settings.beam_size,
+            condition_on_previous_text=False,
+        )
+        for segment in segments:
+            for word in segment.words or []:
+                text = word.word.strip()
+                if text:
+                    # float() because CTranslate2 hands back numpy scalars, which would
+                    # otherwise travel all the way into the JSON report and fail to encode.
+                    words.append(
+                        Word(text, start + float(word.start), start + float(word.end),
+                             float(word.probability))
+                    )
+        settings.language = settings.language or detected.language
+        elapsed = time.monotonic() - started
+        log(f"      {len(words)} words so far, {_hms(before + end)}/{_hms(total)} "
+            f"audio in {_hms(elapsed)} ({(before + end) / max(elapsed, 0.001):.1f}x realtime)")
+    return words
+
+
 def _cache_key(track: AudioTrack, model: str, language: str | None, vad: bool) -> str:
     stat = os.stat(track.path)
     payload = "|".join(
@@ -137,9 +195,9 @@ def transcribe_tracks(
     log=print,
 ) -> tuple[list[Word], dict]:
     """Transcribe every track and return the words in absolute book time."""
-    from .audio import plan_windows
-
     resolved_device, compute_type = pick_device(device)
+    can_fall_back = resolved_device == "cuda" and device != "cuda"
+    settings = _Settings(model_name, language, vad, beam_size, window_seconds)
     words: list[Word] = []
     model = None
     info = {"device": resolved_device, "compute_type": compute_type, "model": model_name,
@@ -149,7 +207,7 @@ def transcribe_tracks(
     done = 0.0
 
     for track in tracks:
-        key = _cache_key(track, model_name, language, vad)
+        key = _cache_key(track, model_name, language, vad) if cache_dir else ""
         cached = _load_cached(cache_dir, key)
         if cached is not None:
             log(f"  [{track.index}/{len(tracks)}] {os.path.basename(track.source)}: "
@@ -162,45 +220,31 @@ def transcribe_tracks(
             done += track.duration
             continue
 
-        if model is None:
-            log(f"  loading whisper model '{model_name}' on {resolved_device} ({compute_type})")
-            model = load_model(model_name, resolved_device, compute_type)
-        windows = plan_windows(track, window_seconds)
-        track_words: list[Word] = []
-        for window_index, (start, end) in enumerate(windows, start=1):
-            audio = read_wav_segment(track.wav_path, start, end)
-            suffix = f" window {window_index}/{len(windows)}" if len(windows) > 1 else ""
-            log(f"  [{track.index}/{len(tracks)}] {os.path.basename(track.source)}{suffix}: "
-                f"transcribing {_hms(end - start)}")
-            segments, detected = model.transcribe(
-                audio,
-                language=language,
-                word_timestamps=True,
-                vad_filter=vad,
-                beam_size=beam_size,
-                condition_on_previous_text=False,
-            )
-            if info["language"] is None:
-                info["language"] = detected.language
-                language = language or detected.language
-            for segment in segments:
-                for word in segment.words or []:
-                    text = word.word.strip()
-                    if text:
-                        # float() because CTranslate2 hands back numpy scalars, which would
-                        # otherwise travel all the way into the JSON report and fail to encode.
-                        track_words.append(
-                            Word(
-                                text,
-                                start + float(word.start),
-                                start + float(word.end),
-                                float(word.probability),
-                            )
-                        )
-            done_now = done + end
-            elapsed = time.monotonic() - started
-            log(f"      {len(track_words)} words so far, {_hms(done_now)}/{_hms(audio_total)} "
-                f"audio in {_hms(elapsed)} ({done_now / max(elapsed, 0.001):.1f}x realtime)")
+        while True:
+            try:
+                if model is None:
+                    log(f"  loading whisper model '{model_name}' on "
+                        f"{resolved_device} ({compute_type})")
+                    model = load_model(model_name, resolved_device, compute_type)
+                track_words = _transcribe_track(
+                    model, track, len(tracks), settings,
+                    before=done, total=audio_total, started=started, log=log,
+                )
+                break
+            except (DependencyError, RuntimeError) as exc:
+                # CTranslate2 only touches the GPU on the first encode, so a broken CUDA
+                # install surfaces here and not when the model was constructed.
+                if not _is_cuda_failure(exc):
+                    raise
+                if not can_fall_back:
+                    raise DependencyError(f"the GPU could not be used: {exc}. {CUDA_HINT}") from exc
+                log(f"  warning: the GPU could not be used ({exc}), falling back to the CPU. "
+                    f"To use the GPU, {CUDA_HINT}.")
+                can_fall_back = False
+                model = None
+                resolved_device, compute_type = "cpu", "int8"
+                info["device"], info["compute_type"] = resolved_device, compute_type
+                info["cuda_fallback"] = str(exc)
         _store_cached(cache_dir, key, track_words)
         words.extend(
             Word(w.text, w.start + track.offset, w.end + track.offset, w.probability)
@@ -209,6 +253,7 @@ def transcribe_tracks(
         done += track.duration
 
     words.sort(key=lambda word: (word.start, word.end))
+    info["language"] = settings.language
     info["words"] = len(words)
     info["seconds"] = round(time.monotonic() - started, 1)
     return words, info

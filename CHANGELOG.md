@@ -12,7 +12,9 @@ First release.
   manifested, no `clipEnd` runs past the duration ffprobe reports, declared durations match the
   clips. `--json` for scripting.
 - Transcription with faster-whisper, CUDA when available and CPU otherwise, word timestamps,
-  and a per-file transcript cache keyed by content and settings.
+  and a per-file transcript cache keyed by content and settings. A GPU that reports itself
+  present but cannot load its CUDA libraries falls back to the CPU with one warning line
+  naming what to install, rather than a traceback.
 - Anchored alignment: unique shared n-grams, longest increasing subsequence, diff only in the
   gaps. No global dynamic-programming matrix, so a 20 hour book stays in a few hundred megabytes.
 - Sidecars: one WebVTT per chapter and audio file, plus `align.json`. `readalign-report.json`

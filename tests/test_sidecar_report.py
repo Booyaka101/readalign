@@ -69,48 +69,57 @@ def test_write_sidecars_writes_one_vtt_per_document(tmp_path):
     assert names == ["align.json", "chapter1.vtt", "chapter2.vtt"]
 
 
-def test_report_counts_and_drift_gate(tmp_path):
+def test_write_sidecars_clears_the_previous_run(tmp_path):
     package, result, tracks = prepared(tmp_path)
-    stats = document_stats(package, result)
-    report = build_report(
-        package, result, tracks, stats,
-        output=str(tmp_path / "out.epub"),
-        asr_info={"device": "cpu", "model": "tiny"},
-        drift_threshold=2.5,
-        warnings=[],
+    directory = tmp_path / "side"
+    directory.mkdir()
+    (directory / "chapter1.part007.vtt").write_text("WEBVTT", encoding="utf-8")
+    (directory / "notes.txt").write_text("keep me", encoding="utf-8")
+    write_sidecars(
+        str(directory), result, tracks,
+        {index: doc.href for index, doc in enumerate(package.docs)},
+        {1: "audio/part001.mp3"},
     )
-    assert report["coverage"]["sentences"] == sum(len(doc.sentences) for doc in package.docs)
-    assert report["coverage"]["aligned"] == len(result.timed)
-    assert report["drift"]["within_threshold"]
-    assert report["documents_without_overlay"] == []
-    assert len(report["documents"]) == len(package.docs)
+    names = sorted(path.name for path in directory.iterdir())
+    assert names == ["align.json", "chapter1.vtt", "chapter2.vtt", "notes.txt"]
+
+
+def reported(tmp_path, warnings=()):
+    """Align the fixture book and report on it, the way a build does."""
+    package, result, tracks = prepared(tmp_path)
+    def report():
+        return build_report(
+            package, result, tracks, document_stats(package, result),
+            output=str(tmp_path / "out.epub"),
+            asr_info={"device": "cpu", "model": "tiny"},
+            drift_threshold=2.5,
+            warnings=list(warnings),
+        )
+    return package, result, report
+
+
+def test_report_counts_and_drift_gate(tmp_path):
+    package, result, report = reported(tmp_path)
+    payload = report()
+    assert payload["coverage"]["sentences"] == sum(len(doc.sentences) for doc in package.docs)
+    assert payload["coverage"]["aligned"] == len(result.timed)
+    assert payload["drift"]["within_threshold"]
+    assert payload["documents_without_overlay"] == []
+    assert len(payload["documents"]) == len(package.docs)
 
 
 def test_report_flags_drift_over_the_threshold(tmp_path):
-    package, result, tracks = prepared(tmp_path)
+    _, result, report = reported(tmp_path, warnings=["something to say"])
     result.timed[2].drift = 9.0
-    report = build_report(
-        package, result, tracks, document_stats(package, result),
-        output=str(tmp_path / "out.epub"),
-        asr_info={},
-        drift_threshold=2.5,
-        warnings=["something to say"],
-    )
-    assert not report["drift"]["within_threshold"]
-    assert report["drift"]["max"] == 9.0
-    assert "something to say" in format_summary(report)
+    payload = report()
+    assert not payload["drift"]["within_threshold"]
+    assert payload["drift"]["max"] == 9.0
+    assert "something to say" in format_summary(payload)
 
 
 def test_report_names_documents_with_no_overlay(tmp_path):
-    package, result, tracks = prepared(tmp_path)
+    _, result, report = reported(tmp_path)
     result.timed = [entry for entry in result.timed if entry.sentence.doc_index == 0]
-    stats = document_stats(package, result)
-    report = build_report(
-        package, result, tracks, stats,
-        output=str(tmp_path / "out.epub"),
-        asr_info={},
-        drift_threshold=2.5,
-        warnings=[],
-    )
-    assert report["documents_without_overlay"] == ["chapter2.xhtml"]
-    assert "no overlay" in format_summary(report)
+    payload = report()
+    assert payload["documents_without_overlay"] == ["chapter2.xhtml"]
+    assert "no overlay" in format_summary(payload)

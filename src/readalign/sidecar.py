@@ -7,6 +7,7 @@ produces two cue files.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import posixpath
@@ -92,6 +93,14 @@ def build_align_json(
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
+def _clear_previous(directory: str) -> None:
+    """Drop the sidecars of an earlier run: a re-run can name its files differently."""
+    for name in os.listdir(directory):
+        if name == "align.json" or name.endswith(".vtt"):
+            with contextlib.suppress(OSError):
+                os.unlink(os.path.join(directory, name))
+
+
 def write_sidecars(
     directory: str,
     result: AlignmentResult,
@@ -104,6 +113,7 @@ def write_sidecars(
     """Write align.json plus one WebVTT per (document, audio file) pair. Returns the paths."""
     by_index = {track.index: track for track in tracks}
     ensure_directory(directory, "sidecar directory")
+    _clear_previous(directory)
 
     grouped: dict[tuple[int, int], list[TimedSentence]] = defaultdict(list)
     for entry in result.timed:

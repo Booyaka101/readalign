@@ -1,13 +1,21 @@
-"""Command line entry point: ``readalign build`` and ``readalign check``."""
+"""Command line entry point: ``readalign build`` and ``readalign check``.
+
+Everything below argparse is imported inside the function that needs it. Pulling in lxml and the
+rest of the package costs 80ms, which is more than ``readalign --version`` should ever take.
+"""
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import posixpath
 import shutil
 import sys
 import tempfile
 import time
+import zipfile
+from urllib.parse import unquote
 
 from . import __version__
 from .errors import InputError, ReadAlignError
@@ -126,6 +134,8 @@ def run_build(args) -> int:
     out_path = os.path.abspath(args.out)
     if os.path.isdir(out_path):
         raise InputError(f"--out points at a directory: {out_path}")
+    if out_path == os.path.abspath(args.epub):
+        raise InputError("--out is the same file as --epub, which would overwrite your ebook")
 
     require_ffmpeg()
     log(f"readalign {__version__}")
@@ -170,7 +180,10 @@ def run_build(args) -> int:
             cache_dir=cache_dir,
             log=log,
         )
-        log(f"  {len(words)} words in {asr_info['seconds']}s on {asr_info['device']}")
+        if asr_info["cached_tracks"] == len(tracks):
+            log(f"  {len(words)} words from cache in {asr_info['seconds']}s")
+        else:
+            log(f"  {len(words)} words in {asr_info['seconds']}s on {asr_info['device']}")
 
         log("aligning")
         result = align(sentences, words, tracks, log=log)
@@ -254,9 +267,6 @@ def run_build(args) -> int:
 
 
 def _resolve(base: str, href: str) -> str:
-    import posixpath
-    from urllib.parse import unquote
-
     target = unquote(href.split("#", 1)[0])
     return posixpath.normpath(posixpath.join(posixpath.dirname(base), target))
 
@@ -319,8 +329,6 @@ def _fragment_ids(archive, doc_path: str, cache: dict[str, set[str]]) -> set[str
 def _probe_clip_ends(archive, max_clip_end: dict[str, float], errors: list[str],
                      warnings: list[str]) -> dict[str, float]:
     """Acceptance check: no clipEnd may sit past the real duration ffprobe reports."""
-    import posixpath
-
     from .audio import ffprobe
 
     durations: dict[str, float] = {}
@@ -345,9 +353,6 @@ def _probe_clip_ends(archive, max_clip_end: dict[str, float], errors: list[str],
 
 def check_epub(path: str, *, probe_audio: bool = True) -> dict:
     """Validate the media overlays of an EPUB. Structural faults are reported, not raised."""
-    import zipfile
-    from urllib.parse import unquote
-
     from lxml import etree
 
     from .clock import parse_clock
@@ -476,8 +481,6 @@ def check_epub(path: str, *, probe_audio: bool = True) -> dict:
 
 
 def run_check(args) -> int:
-    import json
-
     findings = check_epub(args.epub, probe_audio=args.probe)
     if args.json:
         print(json.dumps(findings, ensure_ascii=False, indent=2))
