@@ -4,7 +4,7 @@ import pytest
 from lxml import etree
 
 from conftest import DOC, STRUCTURED, build_epub
-from readalign.epub import element_ids, load_epub, parse_content_document
+from readalign.epub import element_ids, load_epub, local_name, parse_content_document
 from readalign.errors import DRMError, InputError
 
 ENCRYPTION = """<?xml version="1.0" encoding="UTF-8"?>
@@ -170,3 +170,35 @@ def test_structures_are_given_ids_to_point_at(tmp_path):
     for sentence in sentences_of(package):
         for level in sentence.structure:
             assert level.container_id in ids
+
+
+LOOSE = (
+    "<ul><li>The second item carries more weight."
+    "<ol><li>A nested item goes here.</li></ol></li></ul>"
+    "<blockquote><p>He walked on without looking back.</p>"
+    "<cite>Some Book, page four.</cite></blockquote>"
+)
+
+
+def test_text_beside_a_block_child_is_still_narrated(tmp_path):
+    """Text in <li>one<ol>…</ol></li> belongs to no block, and used to be skipped silently."""
+    path = build_epub(str(tmp_path / "loose.epub"), chapters=[("One", LOOSE)])
+    texts = [sentence.text for sentence in sentences_of(load_epub(path))]
+    assert texts == [
+        "The second item carries more weight.",
+        "A nested item goes here.",
+        "He walked on without looking back.",
+        "Some Book, page four.",
+    ]
+
+
+def test_a_run_that_is_one_element_is_not_wrapped(tmp_path):
+    """The markup only gains a span where there is bare text, so styling on <cite> survives."""
+    path = build_epub(str(tmp_path / "cite.epub"), chapters=[("One", LOOSE)])
+    package = load_epub(path)
+    quote = next(
+        element
+        for element in package.docs[0].tree.getroot().iter()
+        if local_name(element.tag) == "blockquote"
+    )
+    assert [local_name(child.tag) for child in quote] == ["p", "cite"]

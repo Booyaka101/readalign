@@ -385,22 +385,82 @@ def _collect_items(block: etree._Element) -> list[_Item]:
     return items
 
 
+def _piece_text(piece: str | etree._Element) -> str:
+    """The narratable text of one child or text fragment, empty for anything not read aloud."""
+    if isinstance(piece, str):
+        return piece
+    if not isinstance(piece.tag, str):
+        return ""
+    if local_name(piece.tag) in _SKIP_TAGS or _is_marker(piece):
+        return ""
+    return "".join(piece.itertext())
+
+
+def _blocks_and_loose_runs(element: etree._Element) -> list[etree._Element]:
+    """The block children of ``element``, in order, with a holder for each run of text beside them.
+
+    Text sitting directly in ``<li>one<ol>…</ol></li>`` belongs to no block of its own, and
+    without a holder the walk descends past it and the narration skips it. A run that is already
+    a single element is used as it stands, so the markup only gains a span for bare text.
+    """
+    pieces: list[str | etree._Element] = []
+    if element.text:
+        pieces.append(element.text)
+    for child in element:
+        pieces.append(child)
+        if child.tail:
+            pieces.append(child.tail)
+
+    namespace = _namespace_of(element)
+    sequence: list[str | etree._Element] = []
+    blocks: list[etree._Element] = []
+    run: list[str | etree._Element] = []
+
+    def flush() -> None:
+        if any(_piece_text(piece).strip() for piece in run):
+            carriers = [piece for piece in run if not isinstance(piece, str)]
+            bare = any(isinstance(piece, str) and piece.strip() for piece in run)
+            if len(carriers) == 1 and not bare:
+                blocks.append(carriers[0])
+                sequence.extend(run)
+            else:
+                span = etree.Element(f"{namespace}span")
+                _fill(span, list(run))
+                blocks.append(span)
+                sequence.append(span)
+        else:
+            sequence.extend(run)
+        run.clear()
+
+    for piece in pieces:
+        if not isinstance(piece, str) and local_name(piece.tag) in _BLOCK_TAGS:
+            flush()
+            sequence.append(piece)
+            blocks.append(piece)
+        else:
+            run.append(piece)
+    flush()
+    _fill(element, sequence)
+    return blocks
+
+
 def _iter_text_blocks(element: etree._Element):
     """Yield the deepest elements that hold running text, skipping non-readable subtrees."""
     tag = local_name(element.tag)
     if tag in _SKIP_TAGS or tag in _ATOMIC_TAGS:
         return
-    block_children = [
-        child
-        for child in element
-        if isinstance(child.tag, str) and local_name(child.tag) in _BLOCK_TAGS
-    ]
-    if block_children:
-        for child in block_children:
-            yield from _iter_text_blocks(child)
+    has_blocks = any(
+        isinstance(child.tag, str) and local_name(child.tag) in _BLOCK_TAGS for child in element
+    )
+    if not has_blocks:
+        if "".join(element.itertext()).strip():
+            yield element
         return
-    if "".join(element.itertext()).strip():
-        yield element
+    for block in _blocks_and_loose_runs(element):
+        if local_name(block.tag) in _BLOCK_TAGS:
+            yield from _iter_text_blocks(block)
+        else:
+            yield block
 
 
 def _snap_to_elements(boundaries: list[int], items: list[_Item]) -> list[int]:
