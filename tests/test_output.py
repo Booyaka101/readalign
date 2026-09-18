@@ -11,7 +11,7 @@ from lxml import etree
 from conftest import build_epub, make_tracks, speak
 from readalign.align import align
 from readalign.cli import check_epub
-from readalign.epub import OPF_NS, load_epub
+from readalign.epub import OPF_NS, load_epub, local_name
 from readalign.package import ACTIVE_CLASS, build_output, ensure_mimetype, write_epub
 from readalign.smil import SMIL_NS
 
@@ -107,6 +107,44 @@ def test_archive_starts_with_a_stored_mimetype(aligned, tmp_path):
         assert first.filename == "mimetype"
         assert first.compress_type == zipfile.ZIP_STORED
         assert archive.read("mimetype") == b"application/epub+zip"
+
+
+def entries_for(package, tracks):
+    """Time a freshly loaded package against the same synthetic narration, as a build would."""
+    sentences = [sentence for doc in package.docs for sentence in doc.sentences]
+    result = align(sentences, speak(sentences), tracks, log=lambda *_: None)
+    entries = {}
+    for entry in result.timed:
+        entries.setdefault(package.docs[entry.sentence.doc_index].manifest_id, []).append(entry)
+    return entries
+
+
+@pytest.mark.skipif(not has_ffmpeg, reason="ffmpeg and ffprobe are needed")
+def test_rebuilding_an_aligned_epub_replaces_rather_than_stacks(aligned, tmp_path):
+    """Re-running build over its own output must not accumulate overlays or stylesheet links."""
+    package, _, tracks, entries = aligned
+    files, first = build_output(package, entries, tracks)
+    ensure_mimetype(files)
+    out = str(tmp_path / "again.epub")
+    write_epub(out, files, package.order)
+
+    for _ in range(2):
+        reloaded = load_epub(out)
+        files, second = build_output(reloaded, entries_for(reloaded, tracks), tracks)
+        ensure_mimetype(files)
+        write_epub(out, files, reloaded.order)
+
+    final = load_epub(out)
+    opf = etree.fromstring(files[final.opf_path])
+    items = list(opf.iter(f"{{{OPF_NS}}}item"))
+    assert second["overlays"] == first["overlays"]
+    assert sum(1 for item in items if item.get("media-type") == "text/css") == 1
+    assert sum(1 for item in items if item.get("media-type") == "application/smil+xml") == 2
+    for doc in final.docs:
+        links = [element for element in doc.tree.getroot().iter()
+                 if local_name(element.tag) == "link"]
+        assert len(links) == 1, f"{doc.href} has {len(links)} stylesheet links"
+    assert check_epub(out)["errors"] == []
 
 
 @pytest.mark.skipif(not has_ffmpeg, reason="ffmpeg and ffprobe are needed")

@@ -12,13 +12,14 @@ import posixpath
 import shutil
 import zipfile
 from dataclasses import dataclass
+from urllib.parse import unquote
 
 from lxml import etree
 
 from .align import TimedSentence
 from .audio import AudioTrack
 from .clock import format_clock
-from .epub import OPF_NS, EpubPackage
+from .epub import OPF_NS, EpubPackage, local_name
 from .errors import InputError
 from .fs import ensure_directory
 from .smil import build_smil, overlay_duration
@@ -111,15 +112,45 @@ def _set_meta(metadata: etree._Element, prop: str, value: str, refines: str | No
     element.text = value
 
 
+def _links_to(doc, css_path: str) -> list[etree._Element]:
+    """The <link> elements in one document that point at ``css_path``."""
+    found = []
+    for element in doc.tree.getroot().iter():
+        if local_name(element.tag) != "link":
+            continue
+        href = element.get("href")
+        if not href:
+            continue
+        resolved = posixpath.normpath(
+            posixpath.join(posixpath.dirname(doc.zip_path), unquote(href))
+        )
+        if resolved == css_path:
+            found.append(element)
+    return found
+
+
+def _strip_previous_stylesheet(
+    package: EpubPackage, manifest: etree._Element, css_path: str
+) -> None:
+    """Drop an earlier run's stylesheet, so re-running replaces the link rather than stacking."""
+    for item in list(package.manifest.values()):
+        if item.media_type == "text/css" and package.resolve(item.href) == css_path:
+            manifest.remove(item.element)
+            package.manifest.pop(item.id, None)
+    for doc in package.docs:
+        for link in _links_to(doc, css_path):
+            link.getparent().remove(link)
+
+
 def _inject_stylesheet(
     package: EpubPackage, manifest: etree._Element, href: str, css_path: str
 ) -> None:
+    _strip_previous_stylesheet(package, manifest, css_path)
     _add_manifest_item(package, manifest, _free_id(package, "readalign-css"), href, "text/css")
     for doc in package.docs:
         root = doc.tree.getroot()
         head = next(
-            (element for element in root.iter() if isinstance(element.tag, str)
-             and element.tag.rsplit("}", 1)[-1] == "head"),
+            (element for element in root.iter() if local_name(element.tag) == "head"),
             None,
         )
         if head is None:

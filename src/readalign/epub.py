@@ -55,7 +55,8 @@ def _is_marker(element: etree._Element) -> bool:
     return any(value in _MARKER_TYPES for value in types)
 
 
-def _local(tag: object) -> str:
+def local_name(tag: object) -> str:
+    """The tag name without its namespace, or "" for comments and processing instructions."""
     if not isinstance(tag, str):
         return ""
     return tag.rsplit("}", 1)[-1]
@@ -339,7 +340,7 @@ def _collect_items(block: etree._Element) -> list[_Item]:
                 items.append(_Item("text", child, child.tail, position))
                 position += len(child.tail)
             continue
-        skip = _local(child.tag) in _SKIP_TAGS or _is_marker(child)
+        skip = local_name(child.tag) in _SKIP_TAGS or _is_marker(child)
         text = "" if skip else "".join(child.itertext())
         items.append(_Item("elem", child, text, position))
         position += len(text)
@@ -351,13 +352,13 @@ def _collect_items(block: etree._Element) -> list[_Item]:
 
 def _iter_text_blocks(element: etree._Element):
     """Yield the deepest elements that hold running text, skipping non-readable subtrees."""
-    tag = _local(element.tag)
+    tag = local_name(element.tag)
     if tag in _SKIP_TAGS or tag in _ATOMIC_TAGS:
         return
     block_children = [
         child
         for child in element
-        if isinstance(child.tag, str) and _local(child.tag) in _BLOCK_TAGS
+        if isinstance(child.tag, str) and local_name(child.tag) in _BLOCK_TAGS
     ]
     if block_children:
         for child in block_children:
@@ -515,7 +516,7 @@ def annotate_document(tree: etree._ElementTree, doc_index: int) -> list[Sentence
     label = doc_index + 1
     taken = element_ids(tree)
     root = tree.getroot()
-    body = next((element for element in root.iter() if _local(element.tag) == "body"), root)
+    body = next((element for element in root.iter() if local_name(element.tag) == "body"), root)
     sentences: list[Sentence] = []
     counter = 0
     for block in list(_iter_text_blocks(body)):
