@@ -44,6 +44,19 @@ CHAPTERS = [
 ]
 
 
+#: A chapter whose narratable text sits inside structures an overlay has to mirror.
+STRUCTURED = (
+    "<p>The ship left the harbour at dawn.</p>"
+    "<table><tr><td>The first cell holds a sentence.</td>"
+    "<td>The second cell holds another one.</td></tr></table>"
+    "<ul><li>The first item stands alone.</li>"
+    "<li><p>The second item carries more weight.</p>"
+    "<ol><li>A nested item goes here.</li></ol></li></ul>"
+    "<figure><figcaption>A caption for the plate.</figcaption></figure>"
+    "<p>Then the fog closed over everything.</p>"
+)
+
+
 def build_epub(path: str, chapters=CHAPTERS, *, version: str = "3.0", extra: dict | None = None):
     """Write a small valid EPUB 3 and return its path."""
     manifest = []

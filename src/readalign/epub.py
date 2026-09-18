@@ -44,6 +44,19 @@ SKIPPABLE_TYPES = {
     "footnote", "endnote", "note", "rearnote", "pagebreak", "noteref", "annotation", "sidebar",
 }
 
+#: XHTML elements a reading system may let the user escape out of, and the epub:type naming the
+#: structure. The overlay mirrors these as nested seq elements, which is what escapability means.
+ESCAPABLE_TAGS = {
+    "table": "table",
+    "tr": "table-row",
+    "td": "table-cell",
+    "th": "table-cell",
+    "ol": "list",
+    "ul": "list",
+    "li": "list-item",
+    "figure": "figure",
+}
+
 #: epub:type values that mark a reference, not narration. Their text is left out of the
 #: sentence stream so a footnote marker cannot glue two sentences together.
 _MARKER_TYPES = {"noteref", "pagebreak"}
@@ -70,6 +83,14 @@ def _namespace_of(element: etree._Element) -> str:
     return ""
 
 
+@dataclass(frozen=True)
+class Structure:
+    """One ancestor the overlay has to mirror, as a SMIL ``seq`` carrying these two values."""
+
+    epub_type: str
+    container_id: str
+
+
 @dataclass
 class Sentence:
     """One narratable unit of text and the fragment id a SMIL ``text`` element points at."""
@@ -79,8 +100,8 @@ class Sentence:
     fragment_id: str
     text: str
     words: list[str]
-    epub_type: str | None = None
-    container_id: str | None = None
+    #: Enclosing structures, outermost first, whether skippable or merely escapable.
+    structure: tuple[Structure, ...] = ()
 
 
 @dataclass
@@ -458,15 +479,32 @@ def _fill(container: etree._Element, pieces: list[str | etree._Element]) -> None
             container.append(piece)
 
 
-def _nearest_skippable(element: etree._Element) -> tuple[str, etree._Element] | None:
-    """The closest ancestor (or the block itself) a reading system may let the user skip."""
-    node: etree._Element | None = element
-    while node is not None and isinstance(node.tag, str):
-        value = node.get(f"{{{EPUB_NS}}}type")
-        if value and SKIPPABLE_TYPES.intersection(value.split()):
-            return value, node
+def _structure_type(element: etree._Element) -> str | None:
+    """The epub:type for the seq mirroring this element, or None if it needs no seq of its own."""
+    for value in (element.get(f"{{{EPUB_NS}}}type") or "").split():
+        if value in SKIPPABLE_TYPES:
+            return value
+    return ESCAPABLE_TAGS.get(local_name(element.tag))
+
+
+def _structure_chain(
+    block: etree._Element, body: etree._Element, label: int, taken: set[str], groups: int
+) -> tuple[tuple[Structure, ...], int]:
+    """Structures enclosing one block, outermost first, giving each an id where it has none."""
+    chain: list[Structure] = []
+    node: etree._Element | None = block
+    while node is not None and node is not body and isinstance(node.tag, str):
+        epub_type = _structure_type(node)
+        if epub_type is not None:
+            identifier = node.get("id")
+            if not identifier:
+                groups += 1
+                identifier = _unique_id(f"ra-{label}-group-{groups}", taken)
+                node.set("id", identifier)
+            chain.append(Structure(epub_type, identifier))
         node = node.getparent()
-    return None
+    chain.reverse()
+    return tuple(chain), groups
 
 
 def _rewrite_block(
@@ -533,6 +571,7 @@ def annotate_document(tree: etree._ElementTree, doc_index: int) -> list[Sentence
     body = next((element for element in root.iter() if local_name(element.tag) == "body"), root)
     sentences: list[Sentence] = []
     counter = 0
+    groups = 0
     for block in list(_iter_text_blocks(body)):
         items = _collect_items(block)
         joined = "".join(item.text for item in items)
@@ -558,14 +597,7 @@ def annotate_document(tree: etree._ElementTree, doc_index: int) -> list[Sentence
             cursor = boundary
         if not units:
             continue
-        skippable = _nearest_skippable(block)
-        epub_type = container_id = None
-        if skippable is not None:
-            epub_type, container = skippable
-            container_id = container.get("id")
-            if not container_id:
-                container_id = _unique_id(f"ra-{label}-group-{len(sentences) + 1}", taken)
-                container.set("id", container_id)
+        structure, groups = _structure_chain(block, body, label, taken, groups)
         produced, counter = _rewrite_block(block, items, units, label, counter, taken)
         for identifier, text in produced:
             words = text.split()
@@ -578,8 +610,7 @@ def annotate_document(tree: etree._ElementTree, doc_index: int) -> list[Sentence
                     fragment_id=identifier,
                     text=" ".join(words),
                     words=words,
-                    epub_type=epub_type,
-                    container_id=container_id,
+                    structure=structure,
                 )
             )
     return sentences

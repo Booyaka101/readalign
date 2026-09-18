@@ -8,12 +8,12 @@ import zipfile
 import pytest
 from lxml import etree
 
-from conftest import build_epub, make_tracks, speak
+from conftest import CHAPTERS, STRUCTURED, build_epub, make_tracks, speak
 from readalign.align import align
 from readalign.cli import check_epub
 from readalign.epub import OPF_NS, load_epub, local_name
 from readalign.package import ACTIVE_CLASS, build_output, ensure_mimetype, write_epub
-from readalign.smil import SMIL_NS
+from readalign.smil import EPUB_NS, SMIL_NS
 
 has_ffmpeg = shutil.which("ffmpeg") and shutil.which("ffprobe")
 
@@ -27,21 +27,31 @@ def silent_mp3(path, seconds):
     return str(path)
 
 
-@pytest.fixture
-def aligned(tmp_path):
-    """A real EPUB plus a real (silent) MP3, timed with a synthetic transcript."""
-    package = load_epub(build_epub(str(tmp_path / "in.epub")))
+def entries_for(package, tracks):
+    """Time a package against synthetic narration and group the result the way a build does."""
     sentences = [sentence for doc in package.docs for sentence in doc.sentences]
-    words = speak(sentences)
+    result = align(sentences, speak(sentences), tracks, log=lambda *_: None)
+    entries = {}
+    for entry in result.timed:
+        entries.setdefault(package.docs[entry.sentence.doc_index].manifest_id, []).append(entry)
+    return result, entries
+
+
+def timed_epub(tmp_path, chapters=CHAPTERS):
+    """A real EPUB plus a real (silent) MP3, timed with a synthetic transcript."""
+    package = load_epub(build_epub(str(tmp_path / "in.epub"), chapters=chapters))
+    words = speak([sentence for doc in package.docs for sentence in doc.sentences])
     duration = words[-1].end + 2.0
     tracks = make_tracks([duration])
     if has_ffmpeg:
         tracks[0].path = silent_mp3(tmp_path / "part001.mp3", duration)
-    result = align(sentences, words, tracks, log=lambda *_: None)
-    entries = {}
-    for entry in result.timed:
-        entries.setdefault(package.docs[entry.sentence.doc_index].manifest_id, []).append(entry)
+    result, entries = entries_for(package, tracks)
     return package, result, tracks, entries
+
+
+@pytest.fixture
+def aligned(tmp_path):
+    return timed_epub(tmp_path)
 
 
 def test_smil_documents_are_well_formed(aligned):
@@ -109,16 +119,6 @@ def test_archive_starts_with_a_stored_mimetype(aligned, tmp_path):
         assert archive.read("mimetype") == b"application/epub+zip"
 
 
-def entries_for(package, tracks):
-    """Time a freshly loaded package against the same synthetic narration, as a build would."""
-    sentences = [sentence for doc in package.docs for sentence in doc.sentences]
-    result = align(sentences, speak(sentences), tracks, log=lambda *_: None)
-    entries = {}
-    for entry in result.timed:
-        entries.setdefault(package.docs[entry.sentence.doc_index].manifest_id, []).append(entry)
-    return entries
-
-
 @pytest.mark.skipif(not has_ffmpeg, reason="ffmpeg and ffprobe are needed")
 def test_rebuilding_an_aligned_epub_replaces_rather_than_stacks(aligned, tmp_path):
     """Re-running build over its own output must not accumulate overlays or stylesheet links."""
@@ -130,7 +130,7 @@ def test_rebuilding_an_aligned_epub_replaces_rather_than_stacks(aligned, tmp_pat
 
     for _ in range(2):
         reloaded = load_epub(out)
-        files, second = build_output(reloaded, entries_for(reloaded, tracks), tracks)
+        files, second = build_output(reloaded, entries_for(reloaded, tracks)[1], tracks)
         ensure_mimetype(files)
         write_epub(out, files, reloaded.order)
 
@@ -210,3 +210,52 @@ def test_checker_accepts_the_official_media_overlays_test_book():
     findings = check_epub(os.environ["READALIGN_MO_TESTBOOK"])
     assert findings["errors"] == []
     assert findings["overlays"] > 0
+
+
+def overlay_shape(element):
+    """A seq/par tree as nested tuples, so a test can state the nesting it expects."""
+    shape = []
+    for child in element:
+        if local_name(child.tag) == "seq":
+            shape.append((child.get(f"{{{EPUB_NS}}}type"), overlay_shape(child)))
+        else:
+            shape.append(child.find(f"{{{SMIL_NS}}}text").get("src").rsplit("#", 1)[1])
+    return shape
+
+
+@pytest.mark.skipif(not has_ffmpeg, reason="ffmpeg and ffprobe are needed")
+def test_overlay_nesting_mirrors_the_document(tmp_path):
+    """Escapability: a reading system can only leave a table if the seqs mirror the markup."""
+    package, _, tracks, entries = timed_epub(tmp_path, chapters=[("One", STRUCTURED)])
+    files, _ = build_output(package, entries, tracks)
+    smil = next(name for name in files if name.endswith(".smil"))
+    body = etree.fromstring(files[smil]).find(f"{{{SMIL_NS}}}body")
+    types = [level for level in overlay_shape(body) if isinstance(level, tuple)]
+    assert [name for name, _ in types] == ["table", "list", "figure"]
+
+    table = dict(types)["table"]
+    assert [name for name, _ in table] == ["table-row"]
+    assert [name for name, _ in table[0][1]] == ["table-cell", "table-cell"]
+
+    def seqs(shape):
+        return [item for item in shape if isinstance(item, tuple)]
+
+    nested = dict(types)["list"]
+    assert [name for name, _ in nested] == ["list-item", "list-item"]
+    # The second item holds a paragraph of its own and then a sublist, in that order.
+    assert isinstance(nested[1][1][0], str)
+    assert [name for name, _ in seqs(nested[1][1])] == ["list"]
+
+
+@pytest.mark.skipif(not has_ffmpeg, reason="ffmpeg and ffprobe are needed")
+def test_every_sentence_still_gets_exactly_one_par(tmp_path):
+    """Nesting must not drop or repeat a sentence, whatever structure it sits in."""
+    package, result, tracks, entries = timed_epub(tmp_path, chapters=[("One", STRUCTURED)])
+    files, _ = build_output(package, entries, tracks)
+    smil = next(name for name in files if name.endswith(".smil"))
+    root = etree.fromstring(files[smil])
+    srcs = [
+        text.get("src").rsplit("#", 1)[1]
+        for text in root.iter(f"{{{SMIL_NS}}}text")
+    ]
+    assert srcs == [entry.sentence.fragment_id for entry in result.timed]

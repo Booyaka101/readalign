@@ -1,8 +1,8 @@
 """Write one media overlay document per content document.
 
 Structure follows EPUB 3.3 section 9.2.2: a ``smil`` root at version 3.0, a ``body`` carrying
-``par`` elements, and a ``seq`` wrapper wherever the text is something a reading system may let
-the user skip (a footnote, a page number).
+``par`` elements, and nested ``seq`` wrappers mirroring the structures a reading system may let
+the user skip (a footnote, a page number) or escape out of (a table, a list, a figure).
 """
 
 from __future__ import annotations
@@ -41,18 +41,26 @@ def build_smil(
     body = etree.SubElement(root, f"{{{SMIL_NS}}}body")
     body.set(f"{{{EPUB_NS}}}textref", text_href)
 
-    container: etree._Element = body
-    current_group: str | None = None
+    # Open seqs, innermost last. Nesting has to mirror the document for escapability to work,
+    # and entries arrive in document order, so a structure is left as soon as its ids stop matching.
+    open_seqs: list[tuple[str, etree._Element]] = []
     for entry in entries:
-        group = entry.sentence.container_id if entry.sentence.epub_type else None
-        if group != current_group:
-            current_group = group
-            if group is None:
-                container = body
-            else:
-                container = etree.SubElement(body, f"{{{SMIL_NS}}}seq")
-                container.set(f"{{{EPUB_NS}}}textref", f"{text_href}#{group}")
-                container.set(f"{{{EPUB_NS}}}type", entry.sentence.epub_type)
+        chain = entry.sentence.structure
+        shared = 0
+        while (
+            shared < len(open_seqs)
+            and shared < len(chain)
+            and open_seqs[shared][0] == chain[shared].container_id
+        ):
+            shared += 1
+        del open_seqs[shared:]
+        for level in chain[shared:]:
+            parent = open_seqs[-1][1] if open_seqs else body
+            seq = etree.SubElement(parent, f"{{{SMIL_NS}}}seq")
+            seq.set(f"{{{EPUB_NS}}}textref", f"{text_href}#{level.container_id}")
+            seq.set(f"{{{EPUB_NS}}}type", level.epub_type)
+            open_seqs.append((level.container_id, seq))
+        container = open_seqs[-1][1] if open_seqs else body
         par = etree.SubElement(container, f"{{{SMIL_NS}}}par")
         text = etree.SubElement(par, f"{{{SMIL_NS}}}text")
         text.set("src", f"{text_href}#{entry.sentence.fragment_id}")

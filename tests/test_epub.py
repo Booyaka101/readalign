@@ -3,8 +3,8 @@
 import pytest
 from lxml import etree
 
-from conftest import DOC, build_epub
-from readalign.epub import load_epub, parse_content_document
+from conftest import DOC, STRUCTURED, build_epub
+from readalign.epub import element_ids, load_epub, parse_content_document
 from readalign.errors import DRMError, InputError
 
 ENCRYPTION = """<?xml version="1.0" encoding="UTF-8"?>
@@ -67,10 +67,11 @@ def test_existing_ids_are_never_overwritten(tmp_path):
 
 def test_footnote_gets_its_epub_type(sample_epub):
     sentences = sentences_of(load_epub(sample_epub))
-    footnotes = [sentence for sentence in sentences if sentence.epub_type]
+    footnotes = [sentence for sentence in sentences if sentence.structure]
     assert len(footnotes) == 1
-    assert footnotes[0].epub_type == "footnote"
-    assert footnotes[0].container_id == "fn1"
+    assert [(level.epub_type, level.container_id) for level in footnotes[0].structure] == [
+        ("footnote", "fn1")
+    ]
 
 
 def test_noteref_marker_does_not_merge_sentences(sample_epub):
@@ -148,3 +149,24 @@ def test_epub_2_is_refused_with_a_hint(tmp_path):
     with pytest.raises(InputError) as info:
         load_epub(path)
     assert "EPUB 3" in str(info.value)
+
+
+def test_structure_chain_mirrors_the_document(tmp_path):
+    path = build_epub(str(tmp_path / "structured.epub"), chapters=[("One", STRUCTURED)])
+    chains = {
+        sentence.text: [level.epub_type for level in sentence.structure]
+        for sentence in sentences_of(load_epub(path))
+    }
+    assert chains["The ship left the harbour at dawn."] == []
+    assert chains["The first cell holds a sentence."] == ["table", "table-row", "table-cell"]
+    assert chains["A nested item goes here."] == ["list", "list-item", "list", "list-item"]
+    assert chains["A caption for the plate."] == ["figure"]
+
+
+def test_structures_are_given_ids_to_point_at(tmp_path):
+    path = build_epub(str(tmp_path / "ids.epub"), chapters=[("One", STRUCTURED)])
+    package = load_epub(path)
+    ids = element_ids(package.docs[0].tree)
+    for sentence in sentences_of(package):
+        for level in sentence.structure:
+            assert level.container_id in ids
