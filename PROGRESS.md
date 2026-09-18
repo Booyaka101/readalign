@@ -55,7 +55,7 @@ Each line below was run on this machine and the output read, not assumed.
 1. Publish to PyPI: `python -m build` then `twine upload dist/*`. `https://pypi.org/pypi/readalign/json`
    returned 404 on 2026-09-18, so the name is free; check it again just before the upload. The
    owner does this from the phone.
-2. Create the GitHub repository `cbosch101/readalign` and push. The URLs in `pyproject.toml`
+2. Create the GitHub repository `Booyaka101/readalign` and push. The URLs in `pyproject.toml`
    already point there, so the PyPI page will link correctly once it exists.
 3. After publishing, confirm `pip install readalign` and `uvx readalign --version` work from a
    machine that has never seen the source.

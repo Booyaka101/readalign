@@ -274,7 +274,7 @@ Failures print one line, not a traceback.
 ## Development
 
 ```
-git clone https://github.com/cbosch101/readalign
+git clone https://github.com/Booyaka101/readalign
 cd readalign
 pip install -e '.[dev]'
 python -m pytest tests -q

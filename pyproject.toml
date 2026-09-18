@@ -50,10 +50,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/cbosch101/readalign"
-Repository = "https://github.com/cbosch101/readalign"
-Issues = "https://github.com/cbosch101/readalign/issues"
-Changelog = "https://github.com/cbosch101/readalign/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/Booyaka101/readalign"
+Repository = "https://github.com/Booyaka101/readalign"
+Issues = "https://github.com/Booyaka101/readalign/issues"
+Changelog = "https://github.com/Booyaka101/readalign/blob/main/CHANGELOG.md"
 
 [project.scripts]
 readalign = "readalign.cli:main"

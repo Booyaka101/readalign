@@ -1,0 +1,10 @@
+* text=auto eol=lf
+
+*.mp3 binary
+*.m4a binary
+*.m4b binary
+*.wav binary
+*.flac binary
+*.epub binary
+*.zip binary
+*.jar binary
