@@ -1,0 +1,84 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "readalign"
+version = "1.0.0"
+description = "Turn an audiobook and the matching ebook you own into one EPUB 3 with Media Overlays."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Christopher Bosch", email = "cbosch101@gmail.com" }]
+keywords = [
+    "epub",
+    "epub3",
+    "media-overlays",
+    "smil",
+    "audiobook",
+    "forced-alignment",
+    "read-along",
+    "whisper",
+    "accessibility",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Text Processing :: Markup :: XML",
+]
+dependencies = [
+    "faster-whisper>=1.1",
+    "lxml>=5.0",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+refine = [
+    "torch>=2.1",
+    "torchaudio>=2.1",
+]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.16",
+]
+
+[project.urls]
+Homepage = "https://github.com/cbosch101/readalign"
+Repository = "https://github.com/cbosch101/readalign"
+Issues = "https://github.com/cbosch101/readalign/issues"
+Changelog = "https://github.com/cbosch101/readalign/blob/main/CHANGELOG.md"
+
+[project.scripts]
+readalign = "readalign.cli:main"
+
+[tool.hatch.build.targets.sdist]
+exclude = ["examples"]
+include = [
+    "src/readalign",
+    "tests",
+    "scripts",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "pyproject.toml",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/readalign"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "C4", "SIM", "RUF"]
