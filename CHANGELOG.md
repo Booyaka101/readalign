@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- New: `--verify [JAR]` runs epubcheck on the result right after the build, prints its verdict,
+  records it under `verify` in the report, and exits 4 when it finds errors. epubcheck needs
+  Java, so the flag is opt-in: with a path it uses that jar, without one it searches `PATH`,
+  `EPUBCHECK_HOME` and `JAVA_HOME`.
+- New: every unaligned region in the report carries an `excerpt` quoting the book's own words,
+  so a stretch that never matched the narration is recognisable without a token diff.
+- Fixed: `--audio` accepted a glob in the documentation but not in the code, so a pattern like
+  `book-*.mp3` failed with "audio not found" on Windows (and anywhere the shell was not asked
+  to expand it). Patterns are now expanded by readalign itself, in natural order, with the same
+  DRM refusal as a directory.
+- Fixed: `readalign check` raised a raw traceback on input that was a valid zip but broken XML:
+  an unparseable `META-INF/container.xml` or package document is now one line and exit 1, and
+  an unparseable overlay or content document is reported as a finding like any other fault
+  instead of crashing the walk.
 - Fixed: rebuilding over an EPUB that already carried overlays kept the previous run's audio
   manifest item, so a re-run whose prepared audio changed name or format shipped the old file
   as dead weight (a full extra audiobook when the suffix drifted). A re-run now drops the

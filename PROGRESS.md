@@ -3,10 +3,12 @@
 **State: v1.0.0 is complete and unpublished.** Everything in the brief is built, the suite is
 green, and both sample books build, validate and check out. A review pass since then closed the
 first deferred item (escapability), fixed text that was silently never narrated, and cut the
-memory the loader and the checker use. Nothing has been pushed to a remote or uploaded anywhere.
-The next action belongs to the owner: publish to PyPI.
+memory the loader and the checker use. A second pass fixed re-runs stacking stale audio and
+manifest ids, a transcript cache that ignored `--beam-size`, sentence splitting after the word
+"no", and added `--verify` plus report excerpts (see CHANGELOG). Nothing has been pushed to a
+remote or uploaded anywhere. The next action belongs to the owner: publish to PyPI.
 
-Last updated 2026-09-18.
+Last updated 2026-10-04.
 
 ## Verified working
 
@@ -20,7 +22,7 @@ Each line below was run on this machine and the output read, not assumed.
 | OCF packaging | `zipfile` one-liner from the brief passes on both outputs: `mimetype` first and `ZIP_STORED` |
 | `readalign check` | reports 18 and 3250 sentences, the same counts the two builds wrote; probes every `clipEnd` against ffprobe |
 | Reference title | `readalign check` on the epubtest.org Media Overlays book reports ok (gated behind `READALIGN_MO_TESTBOOK`) |
-| Test suite | `python -m pytest tests -q` -> 81 passed, 1 skipped; with `READALIGN_MO_TESTBOOK` set, 82 passed |
+| Test suite | `python -m pytest tests -q` -> 106 passed, 1 skipped; with `READALIGN_MO_TESTBOOK` set, 107 passed |
 | Lint | `python -m ruff check .` -> All checks passed |
 | Clean install | wheel installed into an empty venv, then `--version`, a full `build` and a `check` run from a directory outside the repo. Repeated after the last source change |
 | CUDA fallback | that venv has no `cublas64_12.dll`; the build warns once, names the wheels to install, and finishes on the CPU with exit 0 |
@@ -71,5 +73,5 @@ Each line below was run on this machine and the output read, not assumed.
   `3d4884a` and released there with both artefacts attached. CI runs ruff and the suite on Linux
   3.11, Linux 3.12 and Windows; Windows is in the matrix because `zipfile` reports a directory as
   `PermissionError` there and `IsADirectoryError` everywhere else.
-- CI shows 81 passed 1 skipped. The skip is the epubtest.org Media Overlays book, which needs
-  `READALIGN_MO_TESTBOOK`; locally with it set the count is 82 passed.
+- CI shows 106 passed 1 skipped. The skip is the epubtest.org Media Overlays book, which needs
+  `READALIGN_MO_TESTBOOK`; locally with it set the count is 107 passed.

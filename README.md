@@ -17,7 +17,8 @@ readalign build --audio audiobook/ --epub book.epub --out read-along.epub
   `media-overlay` links, `media:duration` metadata and a highlight stylesheet. It passes
   epubcheck 5.2.1 with zero messages.
 - **`readalign-report.json`** next to the output: coverage, drift, per-document statistics, which
-  documents got no overlay and which regions never matched.
+  documents got no overlay and which regions never matched, each quoted with a short excerpt of
+  the book's own words so a bad match is obvious without opening the JSON.
 - **sidecars** (`<name>-sidecars/`): one WebVTT file per chapter and audio file, plus `align.json`
   with every sentence's id, clip times, confidence and text. A rerun clears the `.vtt` files and
   `align.json` it wrote last time, so nothing stale is left behind. Turn them off with
@@ -117,6 +118,12 @@ It is worth running the official validator too:
 java -jar epubcheck.jar aligned.epub
 ```
 
+Or let readalign do it: `--verify` runs epubcheck on the result right after writing it, prints
+its verdict, records it in the report, and exits 4 if it found errors. It needs Java and the
+epubcheck jar, which is why it is opt-in: pass the jar's path (`--verify C:/tools/epubcheck.jar`)
+or leave the value off and readalign will look for one on `PATH`, in `EPUBCHECK_HOME` and in
+`JAVA_HOME`.
+
 ## A full-length run
 
 The 25-file LibriVox recording of *Frankenstein* (7 h 26 m) against the Standard Ebooks edition,
@@ -211,6 +218,9 @@ written; exceeding the threshold only changes the exit code to 3 so a script can
 --beam-size N            whisper beam size (default: 5)
 --no-vad                 disable the voice-activity filter
 --audio-bitrate RATE     bitrate when audio has to be transcoded (default: 96k)
+--verify [JAR]           validate the result with epubcheck after writing it (needs Java);
+                         pass its jar path, or leave the value off to search PATH,
+                         EPUBCHECK_HOME and JAVA_HOME for one
 --work-dir PATH          scratch directory instead of a temporary one
 --cache-dir PATH         transcript cache location
 --no-cache               neither read nor write the transcript cache
@@ -267,6 +277,7 @@ against the reference Media Overlays title from the EPUB test suite at
 | 1 | bad input, missing file, missing ffmpeg, nothing could be aligned |
 | 2 | the input is DRM-protected |
 | 3 | the EPUB was written but max drift exceeded `--drift-threshold` |
+| 4 | the EPUB was written but epubcheck reported problems (only with `--verify`) |
 | 130 | interrupted |
 
 Failures print one line, not a traceback.
