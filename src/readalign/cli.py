@@ -71,6 +71,10 @@ def build_parser() -> argparse.ArgumentParser:
                        help="disable the voice-activity filter")
     build.add_argument("--audio-bitrate", default="96k",
                        help="bitrate used when audio has to be transcoded (default: 96k)")
+    build.add_argument("--verify", nargs="?", const="auto", default=None, metavar="EPUBCHECK",
+                       help="validate the result with epubcheck after writing it (needs Java). "
+                            "Pass its jar path, or leave the value off to search PATH, "
+                            "EPUBCHECK_HOME and JAVA_HOME for one")
     build.add_argument("--work-dir", default=None,
                        help="scratch directory to use instead of a temporary one")
     build.add_argument("--cache-dir", default=None,
@@ -211,6 +215,14 @@ def run_build(args) -> int:
         log(f"wrote {out_path} ({os.path.getsize(out_path) / 1_048_576:.1f} MB, "
             f"{summary['overlays']} overlays, {summary['total_duration']})")
 
+        verification = None
+        if args.verify:
+            from .verify import find_epubcheck, run_epubcheck
+
+            tool = find_epubcheck(args.verify)
+            log("verifying with epubcheck")
+            verification = run_epubcheck(out_path, tool, log=log)
+
         stats = document_stats(package, result)
         for doc in package.docs:
             if doc.recovered:
@@ -229,7 +241,8 @@ def run_build(args) -> int:
             drift_threshold=args.drift_threshold,
             warnings=warnings,
             extras={"elapsed_seconds": round(time.monotonic() - started, 1),
-                    "overlay_duration": summary["total_duration"]},
+                    "overlay_duration": summary["total_duration"],
+                    **({"verify": verification} if verification is not None else {})},
         )
         report_path = os.path.join(os.path.dirname(out_path) or ".", "readalign-report.json")
         write_report(report_path, report)
@@ -254,6 +267,10 @@ def run_build(args) -> int:
 
     print(format_summary(report))
     print(f"  report         {report_path}")
+    if verification is not None:
+        verdict = "clean" if verification["ok"] else "reported problems"
+        print(f"  epubcheck      {verification['errors']} error(s), "
+              f"{verification['warnings']} warning(s): {verdict}")
     if not report["drift"]["within_threshold"]:
         print(
             f"readalign: max drift {report['drift']['max']:.2f}s exceeds the "
@@ -262,6 +279,13 @@ def run_build(args) -> int:
             file=sys.stderr,
         )
         return 3
+    if verification is not None and not verification["ok"]:
+        print(
+            "readalign: epubcheck reported problems with the output; the lines above are its "
+            "own. See the verify section of readalign-report.json.",
+            file=sys.stderr,
+        )
+        return 4
     return 0
 
 
@@ -279,14 +303,24 @@ def _open_package(archive, path: str):
     names = set(archive.namelist())
     if "META-INF/container.xml" not in names:
         raise InputError(f"{path} has no META-INF/container.xml, so it is not an EPUB")
-    container = etree.fromstring(archive.read("META-INF/container.xml"))
+    try:
+        container = etree.fromstring(archive.read("META-INF/container.xml"))
+    except etree.XMLSyntaxError as exc:
+        raise InputError(
+            f"{path}: META-INF/container.xml is not well-formed XML: {exc}"
+        ) from None
     rootfile = container.find(f".//{{{CONTAINER_NS}}}rootfile")
     if rootfile is None or not rootfile.get("full-path"):
         raise InputError(f"{path} has no rootfile in META-INF/container.xml")
     opf_path = rootfile.get("full-path")
     if opf_path not in names:
         raise InputError(f"{path} names a package document that is missing: {opf_path}")
-    return opf_path, etree.fromstring(archive.read(opf_path))
+    try:
+        return opf_path, etree.fromstring(archive.read(opf_path))
+    except etree.XMLSyntaxError as exc:
+        raise InputError(
+            f"{path}: the package document {opf_path} is not well-formed XML: {exc}"
+        ) from None
 
 
 def _overlay_durations(
@@ -312,12 +346,21 @@ def _overlay_durations(
     return durations, total
 
 
-def _fragment_ids(archive, doc_path: str, cache: dict[str, set[str]]) -> set[str]:
+def _fragment_ids(
+    archive, doc_path: str, cache: dict[str, set[str] | None], errors: list[str]
+) -> set[str] | None:
+    """The ids of one content document, or None when the document cannot be parsed at all."""
     from .epub import element_ids, parse_content_document
+    from .errors import InputError
 
     if doc_path not in cache:
-        tree, _, _ = parse_content_document(archive.read(doc_path), doc_path)
-        cache[doc_path] = element_ids(tree)
+        try:
+            tree, _, _ = parse_content_document(archive.read(doc_path), doc_path)
+        except InputError as exc:
+            errors.append(str(exc))
+            cache[doc_path] = None
+        else:
+            cache[doc_path] = element_ids(tree)
     return cache[doc_path]
 
 
@@ -404,7 +447,11 @@ def check_epub(path: str, *, probe_audio: bool = True) -> dict:
                 continue
             if overlay_id not in durations:
                 warnings.append(f"overlay '{overlay_id}' has no media:duration metadata")
-            smil = etree.fromstring(archive.read(smil_path))
+            try:
+                smil = etree.fromstring(archive.read(smil_path))
+            except etree.XMLSyntaxError as exc:
+                errors.append(f"{smil_path}: the overlay is not well-formed XML: {exc}")
+                continue
             overlay_clip = 0.0
             for par in smil.iter(f"{{{SMIL_NS}}}par"):
                 pars += 1
@@ -418,8 +465,10 @@ def check_epub(path: str, *, probe_audio: bool = True) -> dict:
                 fragment = unquote(src.split("#", 1)[1]) if "#" in src else ""
                 if doc_path not in names:
                     errors.append(f"{smil_path}: text points at a missing document {doc_path}")
-                elif fragment and fragment not in _fragment_ids(archive, doc_path, fragments):
-                    errors.append(f"{smil_path}: no element '{fragment}' in {doc_path}")
+                elif fragment:
+                    ids = _fragment_ids(archive, doc_path, fragments, errors)
+                    if ids is not None and fragment not in ids:
+                        errors.append(f"{smil_path}: no element '{fragment}' in {doc_path}")
                 if audio is None or not audio.get("src"):
                     errors.append(f"{smil_path}: a par has no audio src")
                     continue

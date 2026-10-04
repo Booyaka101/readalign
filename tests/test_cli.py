@@ -1,6 +1,7 @@
 """The command line surface: defaults, exit codes, and refusals that stay readable."""
 
 import shutil
+import zipfile
 
 import pytest
 
@@ -108,6 +109,65 @@ def test_check_on_an_epub_without_overlays(tmp_path, capsys):
     code = main(["check", epub, "--no-audio-probe"])
     assert code == 1
     assert "no spine document has a media-overlay attribute" in capsys.readouterr().err
+
+
+def _rewrite(path, changes):
+    """Copy an EPUB with some entries replaced, keeping the stored mimetype first."""
+    with zipfile.ZipFile(path) as archive:
+        entries = {name: archive.read(name) for name in archive.namelist()}
+    entries.update(changes)
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, data in entries.items():
+            if name == "mimetype":
+                info = zipfile.ZipInfo(name)
+                info.compress_type = zipfile.ZIP_STORED
+                archive.writestr(info, data)
+            else:
+                archive.writestr(name, data)
+    return path
+
+
+def test_check_on_a_corrupt_container_is_one_line_not_a_traceback(tmp_path, capsys):
+    path = str(tmp_path / "corrupt.epub")
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("mimetype", b"application/epub+zip")
+        archive.writestr("META-INF/container.xml", b"<container version=1.0><oops")
+    code = main(["check", path])
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "container.xml is not well-formed XML" in err
+    assert "Traceback" not in err
+
+
+def test_check_on_a_corrupt_package_document_is_one_line(tmp_path, capsys):
+    path = build_epub(str(tmp_path / "corrupt-opf.epub"))
+    path = _rewrite(path, {"EPUB/package.opf": b"<?xml version=1.0?><package><manifest>"})
+    code = main(["check", path, "--no-audio-probe"])
+    assert code == 1
+    assert "package document EPUB/package.opf is not well-formed XML" in capsys.readouterr().err
+
+
+def test_check_reports_a_broken_overlay_as_a_finding_not_a_crash(tmp_path, capsys):
+    path = build_epub(str(tmp_path / "brokensmil.epub"))
+    with zipfile.ZipFile(path) as archive:
+        opf = archive.read("EPUB/package.opf")
+    path = _rewrite(
+        path,
+        {
+            "EPUB/package.opf": opf.replace(
+                b'<item id="c1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>',
+                b'<item id="c1" href="chapter1.xhtml" media-type="application/xhtml+xml" '
+                b'media-overlay="ov1"/>',
+            ).replace(
+                b"</manifest>",
+                b'<item id="ov1" href="ov1.smil" media-type="application/smil+xml"/></manifest>',
+            ),
+            "EPUB/ov1.smil": b"<smil xmlns=http://www.w3.org/ns/SMIL broken",
+        },
+    )
+    code = main(["check", path, "--no-audio-probe"])
+    assert code == 1
+    assert "ov1.smil: the overlay is not well-formed XML" in capsys.readouterr().err
 
 
 def test_negative_drift_threshold_is_refused(tmp_path, capsys):
