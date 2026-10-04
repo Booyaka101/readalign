@@ -1,13 +1,14 @@
 # readalign progress
 
-**State: 1.0.0 is on PyPI; this pass prepared 1.1.0.** Everything in the brief is built, the
-suite is green, and both sample books build, validate and check out. A review pass after the
-release closed the first deferred item (escapability), fixed text that was silently never
-narrated, and cut the memory the loader and the checker use. A second pass fixed re-runs
-stacking stale audio and manifest ids, a transcript cache that ignored `--beam-size`, sentence
-splitting after the word "no", made `--audio` globs actually work and broken XML in `check` a
-finding instead of a traceback, and added `--verify` plus report excerpts (see CHANGELOG).
-1.0.0 was uploaded to PyPI on 2026-09-18 from the v1.0.0 release artefacts.
+**State: 1.1.0 is released.** Everything in the brief is built, the suite is green, and both
+sample books build, validate and check out. A review pass after the release closed the first
+deferred item (escapability), fixed text that was silently never narrated, and cut the memory
+the loader and the checker use. A second pass fixed re-runs stacking stale audio and manifest
+ids, a transcript cache that ignored `--beam-size`, sentence splitting after the word "no",
+made `--audio` globs actually work and broken XML in `check` a finding instead of a traceback,
+and added `--verify` plus report excerpts (see CHANGELOG). v1.1.0 is tagged and pushed with
+both artefacts attached to the GitHub release, and 1.1.0 is on PyPI. 1.0.0 was uploaded to
+PyPI on 2026-09-18 from the v1.0.0 release artefacts.
 
 Last updated 2026-10-04.
 
@@ -25,6 +26,7 @@ Each line below was run on this machine and the output read, not assumed.
 | Reference title | `readalign check` on the epubtest.org Media Overlays book reports ok (gated behind `READALIGN_MO_TESTBOOK`) |
 | Test suite | `python -m pytest tests -q` -> 106 passed, 1 skipped; with `READALIGN_MO_TESTBOOK` set, 107 passed |
 | Lint | `python -m ruff check .` -> All checks passed |
+| 1.1.0 release | built from `13d0274`: `twine check` passed on both artefacts; the wheel installed into an empty venv, `readalign --version` and `python -m readalign --version` say 1.1.0, and the Aesop build from that install reproduces the `d998e692...3f98` hash; after upload, `pip install readalign` from PyPI in a third venv also says 1.1.0 |
 | Clean install | wheel installed into an empty venv, then `--version`, a full `build` and a `check` run from a directory outside the repo. Repeated after the last source change |
 | CUDA fallback | that venv has no `cublas64_12.dll`; the build warns once, names the wheels to install, and finishes on the CPU with exit 0 |
 | Sidecar rerun | rebuilding Frankenstein over an older sidecar directory leaves exactly the 44 files it reports, with no leftovers from the previous track split |
@@ -55,11 +57,9 @@ Each line below was run on this machine and the output read, not assumed.
 
 ## Next steps
 
-1. 1.0.0 was uploaded to PyPI on 2026-09-18 (the release artefacts), so the name is taken by
-   this project and 1.0.0 can never be re-uploaded; a mistake from here means 1.1.1.
-2. After publishing 1.1.0, confirm `pip install readalign` and `uvx readalign --version` work
-   from a machine that has never seen the source.
-3. Announce wherever audiobook and accessibility people are, with the Frankenstein numbers.
+1. Confirm `uvx readalign --version` works somewhere uv is installed (pip-from-PyPI was
+   confirmed here).
+2. Announce wherever audiobook and accessibility people are, with the Frankenstein numbers.
 
 ## Working notes
 
@@ -67,8 +67,9 @@ Each line below was run on this machine and the output read, not assumed.
   outside the repo on purpose: `scripts/fetch_samples.py long` rebuilds it in a few minutes.
 - The transcript cache lives in `%LOCALAPPDATA%/readalign/cache`. The 25 Frankenstein tracks are
   in it, so a rebuild of that book takes about 90 seconds instead of twelve minutes.
-- Twenty commits on `main` at <https://github.com/Booyaka101/readalign>. v1.0.0 is tagged at
-  `3d4884a` and released there with both artefacts attached. CI runs ruff and the suite on Linux
+- Thirty-one commits on `main` at <https://github.com/Booyaka101/readalign>. v1.0.0 is tagged at
+  `3d4884a` and v1.1.0 at `13d0274`, both released there with artefacts attached. CI runs ruff and
+  the suite on Linux
   3.11, Linux 3.12 and Windows; Windows is in the matrix because `zipfile` reports a directory as
   `PermissionError` there and `IsADirectoryError` everywhere else.
 - CI shows 106 passed 1 skipped. The skip is the epubtest.org Media Overlays book, which needs
