@@ -55,7 +55,25 @@ def test_drm_audio_exits_two(tmp_path, capsys):
     code = main(["build", "--audio", str(tmp_path / "book.aax"), "--epub", epub,
                  "--out", str(tmp_path / "out.epub"), "--dry-run"])
     assert code == 2
-    assert "DRM" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "DRM" in err
+    assert "book.aax" in err
+
+
+@pytest.mark.skipif(not has_ffmpeg, reason="ffmpeg is needed")
+def test_drm_file_in_an_audio_directory_is_named(tmp_path, capsys):
+    from test_output import silent_mp3
+
+    epub = build_epub(str(tmp_path / "book.epub"))
+    audio = tmp_path / "audio"
+    audio.mkdir()
+    silent_mp3(audio / "part01.mp3", 5)
+    (audio / "licence.acsm").write_bytes(b"a download ticket, not audio")
+    code = main(["build", "--audio", str(audio), "--epub", epub,
+                 "--out", str(tmp_path / "out.epub"), "--dry-run"])
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "licence.acsm" in err
 
 
 @pytest.mark.skipif(not has_ffmpeg, reason="ffmpeg is needed")

@@ -482,6 +482,9 @@ def run_check(args) -> int:
         print(f"  media:duration {findings['declared_total'] / 3600:.2f} hours declared")
     for warning in findings["warnings"][:20]:
         print(f"  warning        {warning}")
+    hidden_warnings = len(findings["warnings"]) - 20
+    if hidden_warnings > 0:
+        print(f"  warning        and {hidden_warnings} more")
     for error in findings["errors"][:20]:
         print(f"  error          {error}", file=sys.stderr)
     hidden = len(findings["errors"]) - 20

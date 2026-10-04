@@ -124,17 +124,18 @@ def _duration_of(probe: dict, path: str) -> float:
 
 
 def _reject_drm(path: str, probe: dict | None = None) -> None:
+    name = os.path.basename(path)
     if os.path.splitext(path)[1].lower() in DRM_EXTENSIONS:
-        raise DRMError("readalign does not handle DRM-protected files")
+        raise DRMError(f"readalign does not handle DRM-protected files: {name}")
     if probe is None:
         return
     for stream in probe.get("streams", []):
         if (stream.get("codec_tag_string") or "").lower() in _DRM_CODEC_TAGS:
-            raise DRMError("readalign does not handle DRM-protected files")
+            raise DRMError(f"readalign does not handle DRM-protected files: {name}")
     raw_tags = probe.get("format", {}).get("tags") or {}
     tags = {key.lower(): value for key, value in raw_tags.items()}
     if any("drm" in key for key in tags):
-        raise DRMError("readalign does not handle DRM-protected files")
+        raise DRMError(f"readalign does not handle DRM-protected files: {name}")
 
 
 def discover_inputs(path: str) -> list[str]:
@@ -149,15 +150,14 @@ def discover_inputs(path: str) -> list[str]:
                 f"(expected one of {', '.join(sorted(AUDIO_EXTENSIONS))})"
             )
         return [path]
-    entries = [
-        os.path.join(path, name)
-        for name in os.listdir(path)
-        if os.path.splitext(name)[1].lower() in AUDIO_EXTENSIONS
-        and os.path.isfile(os.path.join(path, name))
-    ]
-    for entry in os.listdir(path):
-        if os.path.splitext(entry)[1].lower() in DRM_EXTENSIONS:
-            raise DRMError("readalign does not handle DRM-protected files")
+    entries = []
+    for name in os.listdir(path):
+        suffix = os.path.splitext(name)[1].lower()
+        if suffix in DRM_EXTENSIONS:
+            # Refuse the whole directory rather than transcribe around a protected file.
+            raise DRMError(f"readalign does not handle DRM-protected files: {name}")
+        if suffix in AUDIO_EXTENSIONS and os.path.isfile(os.path.join(path, name)):
+            entries.append(os.path.join(path, name))
     if not entries:
         wanted = ", ".join(sorted(AUDIO_EXTENSIONS))
         raise InputError(f"no audio files in {path} (looked for {wanted})")
