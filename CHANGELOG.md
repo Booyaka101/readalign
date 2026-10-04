@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+- Fixed: rebuilding over an EPUB that already carried overlays kept the previous run's audio
+  manifest item, so a re-run whose prepared audio changed name or format shipped the old file
+  as dead weight (a full extra audiobook when the suffix drifted). A re-run now drops the
+  previous audio and reuses the same manifest ids, the way it already did for overlays and the
+  stylesheet.
+- Fixed: manifest items added while writing an output were not registered in the package's
+  manifest index, so two builds over one package could hand out the same item id twice.
+- Fixed: the transcript cache key ignored `--beam-size` (and the window plan), so changing the
+  beam silently served a transcript made with the old setting. Keys now cover every setting
+  that changes the transcription, which invalidates caches written by 1.0.0 once.
+- Fixed: a sentence ending in the word "no" never split from the next one ("He said no. She
+  left."), because "no" sat in the abbreviation table. Numbered labels like "No. 5" still stay
+  together: the digit after the period is not an uppercase word.
+- Fixed: the warning for a failed cache write bypassed the `--quiet` log and printed straight
+  to stderr; it now goes through the log like every other progress line.
+- DRM refusals name the file they refused, which matters when a directory of audio contains
+  one protected straggler.
+- `readalign check` says "and N more" after its first twenty warnings, as it already did for
+  errors, instead of truncating silently.
+
 ## 1.0.0 - 2026-09-18
 
 First release.
