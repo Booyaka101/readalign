@@ -12,7 +12,6 @@ import hashlib
 import json
 import os
 import site
-import sys
 import time
 from dataclasses import asdict, dataclass
 
@@ -149,11 +148,15 @@ def _transcribe_track(model, track, count, settings, *, before, total, started, 
     return words
 
 
-def _cache_key(track: AudioTrack, model: str, language: str | None, vad: bool) -> str:
+def _cache_key(
+    track: AudioTrack, model: str, language: str | None, vad: bool, beam_size: int,
+    window_seconds: float,
+) -> str:
     stat = os.stat(track.path)
     payload = "|".join(
         [os.path.basename(track.source), str(stat.st_size), f"{track.duration:.3f}",
-         model, language or "auto", str(vad)]
+         model, language or "auto", str(vad), f"beam{beam_size}",
+         f"window{window_seconds:g}"]
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:20]
 
@@ -178,7 +181,7 @@ def _load_cached(cache_dir: str | None, key: str) -> tuple[list[Word], str | Non
 
 
 def _store_cached(
-    cache_dir: str | None, key: str, words: list[Word], language: str | None
+    cache_dir: str | None, key: str, words: list[Word], language: str | None, *, log=print
 ) -> None:
     if not cache_dir:
         return
@@ -188,7 +191,7 @@ def _store_cached(
         with open(path, "w", encoding="utf-8") as handle:
             json.dump({"language": language, "words": [asdict(w) for w in words]}, handle)
     except OSError as exc:
-        print(f"  warning: could not write the transcript cache: {exc}", file=sys.stderr)
+        log(f"  warning: could not write the transcript cache: {exc}")
 
 
 def transcribe_tracks(
@@ -216,7 +219,11 @@ def transcribe_tracks(
     done = 0.0
 
     for track in tracks:
-        key = _cache_key(track, model_name, language, vad) if cache_dir else ""
+        key = (
+            _cache_key(track, model_name, language, vad, beam_size, window_seconds)
+            if cache_dir
+            else ""
+        )
         cached = _load_cached(cache_dir, key)
         if cached is not None:
             cached_words, cached_language = cached
@@ -256,7 +263,7 @@ def transcribe_tracks(
                 resolved_device, compute_type = "cpu", "int8"
                 info["device"], info["compute_type"] = resolved_device, compute_type
                 info["cuda_fallback"] = str(exc)
-        _store_cached(cache_dir, key, track_words, settings.language)
+        _store_cached(cache_dir, key, track_words, settings.language, log=log)
         words.extend(
             Word(w.text, w.start + track.offset, w.end + track.offset, w.probability)
             for w in track_words

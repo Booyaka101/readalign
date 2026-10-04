@@ -100,6 +100,27 @@ def test_a_cached_run_reports_the_language_the_first_run_detected(monkeypatch, t
     assert [word.text for word in words] == ["hello"]
 
 
+def test_the_cache_key_covers_every_setting_that_changes_the_transcript(tmp_path):
+    """A different beam size or window plan transcribes differently, so the key must differ."""
+    track = one_track(tmp_path)[0]
+    base = asr._cache_key(track, "tiny", None, True, 5, 3600.0)
+    assert asr._cache_key(track, "tiny", None, True, 5, 3600.0) == base
+    assert asr._cache_key(track, "tiny", None, True, 1, 3600.0) != base
+    assert asr._cache_key(track, "tiny", None, True, 5, 1800.0) != base
+    assert asr._cache_key(track, "tiny", "de", True, 5, 3600.0) != base
+    assert asr._cache_key(track, "tiny", None, False, 5, 3600.0) != base
+
+
+def test_a_cache_write_failure_is_reported_through_the_log(tmp_path, capsys):
+    """--quiet swaps the log for a no-op, so cache warnings must not print behind its back."""
+    cache = tmp_path / "cache"
+    cache.write_bytes(b"")  # a file where the cache directory should be
+    asr._store_cached(str(cache), "key", [asr.Word("x", 0.0, 0.1, 1.0)], None, log=print)
+    assert "could not write the transcript cache" in capsys.readouterr().out
+    # And it stays quiet, and harmless, when the log is the quiet no-op.
+    asr._store_cached(str(cache), "key", [], None, log=lambda *_: None)
+
+
 def _written_before_languages(data):
     """A cache from an older readalign: a bare list of words with no language beside them."""
     return data["words"]
