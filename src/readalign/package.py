@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import posixpath
+import re
 import shutil
 import zipfile
 from urllib.parse import unquote
@@ -18,7 +19,7 @@ from lxml import etree
 from .align import TimedSentence
 from .audio import AudioTrack
 from .clock import format_clock
-from .epub import OPF_NS, EpubPackage, local_name
+from .epub import OPF_NS, EpubPackage, ManifestItem, local_name
 from .errors import InputError
 from .fs import ensure_directory
 from .members import Member, MemberReader, SourceFile
@@ -42,6 +43,12 @@ _MEDIA_TYPES_BY_SUFFIX = {
     ".m4a": "audio/mp4",
     ".opus": "audio/ogg; codecs=opus",
 }
+
+#: The member names build_output gives its audio, e.g. ``audio/part007.m4a``. Matching this
+#: pattern is what lets a re-run recognise the files a previous run embedded.
+_AUDIO_NAME_RE = re.compile(
+    r"audio/part\d{3}\.(?:" + "|".join(s.lstrip(".") for s in _MEDIA_TYPES_BY_SUFFIX) + ")"
+)
 
 
 def _manifest_element(package: EpubPackage) -> etree._Element:
@@ -76,14 +83,29 @@ def _add_manifest_item(
     element.set("id", item_id)
     element.set("href", href)
     element.set("media-type", media_type)
+    # Registered in package.manifest as well, or _free_id cannot see ids this build added and
+    # hands the same id out twice.
+    package.manifest[item_id] = ManifestItem(
+        id=item_id, href=href, media_type=media_type, properties=None, element=element
+    )
     return element
 
 
-def _strip_existing_overlays(package: EpubPackage, manifest: etree._Element) -> set[str]:
-    """Drop overlays from an EPUB that already has them, so a re-run replaces rather than stacks."""
+def _is_previous_audio(package: EpubPackage, zip_path: str) -> bool:
+    """Whether an archive member is audio a previous readalign run embedded."""
+    prefix = f"{package.opf_dir}/" if package.opf_dir else ""
+    if not zip_path.startswith(prefix):
+        return False
+    return _AUDIO_NAME_RE.fullmatch(zip_path[len(prefix):]) is not None
+
+
+def _strip_previous_run(package: EpubPackage, manifest: etree._Element) -> set[str]:
+    """Drop a previous run's overlays and audio, so a re-run replaces rather than stacks."""
     removed: set[str] = set()
     for item in list(package.manifest.values()):
-        if item.media_type == "application/smil+xml":
+        if item.media_type == "application/smil+xml" or _is_previous_audio(
+            package, package.resolve(item.href)
+        ):
             manifest.remove(item.element)
             package.manifest.pop(item.id, None)
             removed.add(package.resolve(item.href))
@@ -169,7 +191,7 @@ def build_output(
     manifest = _manifest_element(package)
     metadata = _metadata_element(package)
     _drop_existing_overlay_metadata(metadata)
-    replaced = _strip_existing_overlays(package, manifest)
+    previous = _strip_previous_run(package, manifest)
 
     by_index = {track.index: track for track in tracks}
     used_tracks = sorted(
@@ -177,8 +199,12 @@ def build_output(
     )
     audio_paths: dict[int, str] = {}
     audio_hrefs: dict[int, str] = {}
+    # A previous run's audio is dropped even without a manifest item, so nothing dead rides
+    # along when this run embeds different files.
     files: Member = {
-        name: data for name, data in package.files.items() if name not in replaced
+        name: data
+        for name, data in package.files.items()
+        if name not in previous and not _is_previous_audio(package, name)
     }
 
     for index in used_tracks:

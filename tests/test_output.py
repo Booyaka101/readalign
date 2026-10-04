@@ -12,6 +12,7 @@ from conftest import CHAPTERS, STRUCTURED, build_epub, make_tracks, speak
 from readalign.align import align
 from readalign.cli import check_epub
 from readalign.epub import OPF_NS, load_epub, local_name
+from readalign.members import SourceFile
 from readalign.package import ACTIVE_CLASS, build_output, ensure_mimetype, write_epub
 from readalign.smil import EPUB_NS, SMIL_NS
 
@@ -140,11 +141,60 @@ def test_rebuilding_an_aligned_epub_replaces_rather_than_stacks(aligned, tmp_pat
     assert second["overlays"] == first["overlays"]
     assert sum(1 for item in items if item.get("media-type") == "text/css") == 1
     assert sum(1 for item in items if item.get("media-type") == "application/smil+xml") == 2
+    audio = [
+        (item.get("id"), item.get("href"))
+        for item in items
+        if (item.get("media-type") or "").startswith("audio/")
+    ]
+    assert audio == [("readalign-audio-001", "audio/part001.mp3")]
     for doc in final.docs:
         links = [element for element in doc.tree.getroot().iter()
                  if local_name(element.tag) == "link"]
         assert len(links) == 1, f"{doc.href} has {len(links)} stylesheet links"
     assert check_epub(out)["errors"] == []
+
+
+def test_rebuilding_with_different_audio_drops_the_old_file(aligned, tmp_path):
+    """A re-run whose prepared audio gets a new name must not ship the old file as dead weight."""
+    package, _, tracks, entries = aligned
+    files, _ = build_output(package, entries, tracks)
+    files = {
+        name: (b"audio" if isinstance(data, SourceFile) else data)
+        for name, data in files.items()
+    }
+    ensure_mimetype(files)
+    out = str(tmp_path / "again.epub")
+    write_epub(out, files, package.order)
+
+    reloaded = load_epub(out)
+    replacement = make_tracks([tracks[0].duration], suffix=".m4a")
+    _, fresh = entries_for(reloaded, replacement)
+    files, _ = build_output(reloaded, fresh, replacement)
+
+    assert sorted(name for name in files if "/audio/" in name) == ["EPUB/audio/part001.m4a"]
+    opf = etree.fromstring(files[reloaded.opf_path])
+    audio = [
+        (item.get("id"), item.get("href"))
+        for item in opf.iter(f"{{{OPF_NS}}}item")
+        if (item.get("media-type") or "").startswith("audio/")
+    ]
+    assert audio == [("readalign-audio-001", "audio/part001.m4a")]
+
+
+def test_building_twice_over_one_package_keeps_ids_unique(aligned):
+    """Items added in one build must be visible to the next, or ids repeat."""
+    package, _, tracks, entries = aligned
+    build_output(package, entries, tracks)
+    files, _ = build_output(package, entries, tracks)
+    opf = etree.fromstring(files[package.opf_path])
+    ids = [item.get("id") for item in opf.iter(f"{{{OPF_NS}}}item")]
+    assert len(ids) == len(set(ids))
+    audio = [
+        item.get("href")
+        for item in opf.iter(f"{{{OPF_NS}}}item")
+        if (item.get("media-type") or "").startswith("audio/")
+    ]
+    assert audio == ["audio/part001.mp3"]
 
 
 @pytest.mark.skipif(not has_ffmpeg, reason="ffmpeg and ffprobe are needed")
