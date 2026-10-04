@@ -175,6 +175,14 @@ def _track_for(tracks: list[AudioTrack], moment: float) -> AudioTrack:
     return tracks[-1]
 
 
+def _excerpt(raw: list[str], start: int, end: int, limit: int = 12) -> str:
+    """A short human-readable preview of one unaligned stretch, for the report."""
+    words = raw[max(0, start): max(0, start, end)]
+    if len(words) <= limit:
+        return " ".join(words)
+    return " ".join(words[:limit]) + " ..."
+
+
 def align(
     sentences: list[Sentence],
     words: list[Word],
@@ -192,11 +200,14 @@ def align(
         )
 
     book_tokens: list[str] = []
+    book_raw: list[str] = []
     sentence_spans: list[tuple[int, int]] = []
     for sentence in sentences:
-        tokens, _ = tokenize_words(sentence.words)
+        tokens, origins = tokenize_words(sentence.words)
         sentence_spans.append((len(book_tokens), len(book_tokens) + len(tokens)))
         book_tokens.extend(tokens)
+        # The raw word behind every token, so the report can quote the book's own spelling.
+        book_raw.extend(sentence.words[origin] for origin in origins)
 
     asr_tokens, asr_origin = tokenize_words([word.text for word in words])
     if not book_tokens:
@@ -224,6 +235,7 @@ def align(
         unaligned_regions=[
             {
                 "book_tokens": [region[0], region[1]],
+                "excerpt": _excerpt(book_raw, region[0], region[1]),
                 "audio_seconds": [
                     round(words[asr_origin[min(region[2], len(asr_origin) - 1)]].start, 2),
                     round(words[asr_origin[min(region[3] - 1, len(asr_origin) - 1)]].end, 2),

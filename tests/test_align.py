@@ -108,3 +108,31 @@ def test_align_tokens_finds_the_long_common_run():
     assert all(book_tokens[b] == asr_tokens[a] for b, a in pairs)
     assert pairs == sorted(pairs)
     assert all(region[1] > region[0] or region[3] > region[2] for region in unaligned)
+
+
+def test_unaligned_regions_carry_an_excerpt_of_the_book(tmp_path, monkeypatch):
+    """The report quotes the book's own words for a stretch the narration never matched."""
+    import readalign.align as align_module
+    from readalign.asr import Word
+    from readalign.textnorm import tokenize_words
+
+    monkeypatch.setattr(align_module, "SMALL_REGION", 5)
+    monkeypatch.setattr(align_module, "MAX_DIFF_CELLS", 100)
+    _, sentences = book(tmp_path)
+
+    noise = [
+        Word(f"static{i}", i * 0.3, i * 0.3 + 0.25, 0.9) for i in range(20)
+    ]
+    result = align(
+        sentences, noise + speak(sentences[2:4], start=8.0), make_tracks([600.0]),
+        log=lambda *_: None,
+    )
+    assert result.unaligned_regions
+
+    # The first region is the whole of the unmatched front matter: sentences zero and one,
+    # whose raw spelling the excerpt must quote exactly.
+    expected: list[str] = []
+    for sentence in sentences[:2]:
+        _, origins = tokenize_words(sentence.words)
+        expected.extend(sentence.words[origin] for origin in origins)
+    assert result.unaligned_regions[0]["excerpt"] == " ".join(expected)
