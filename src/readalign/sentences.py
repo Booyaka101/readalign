@@ -10,11 +10,13 @@ import re
 
 _ABBREVIATIONS = {
     "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "rev", "hon", "gen", "col", "capt",
-    "lieut", "lt", "sgt", "maj", "messrs", "mme", "mlle", "esq", "no", "vol", "chap", "fig",
+    "lieut", "lt", "sgt", "maj", "messrs", "mme", "mlle", "esq", "vol", "chap", "fig",
     "pp", "ed", "vs", "etc", "viz", "cf", "ibid", "al", "inc", "ltd", "co", "dept", "univ",
     "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
     "i.e", "e.g", "a.m", "p.m", "u.s", "u.k",
 }
+# "no" is deliberately absent: a sentence really can end in the word, and the next-word
+# heuristic already keeps "No. 5" (a digit is not uppercase) from splitting.
 
 _TERMINATOR = re.compile(r"[.!?…]")
 # Typographic quotes and dashes, deliberately: real ebooks are full of them.

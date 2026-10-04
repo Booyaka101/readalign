@@ -50,6 +50,19 @@ def test_sentence_splitting_keeps_single_initials_together():
     assert pieces == ["It was written by J. R. Hartley.", "He was pleased."]
 
 
+def test_a_sentence_can_end_in_the_word_no():
+    """"No" is not treated as an abbreviation: dialogue ends in it all the time."""
+    text = "He said no. She left without another word."
+    pieces = [text[start:end] for start, end in split_sentences(text)]
+    assert pieces == ["He said no.", "She left without another word."]
+
+
+def test_a_numbered_label_like_no_5_stays_together():
+    text = "He lived at No. 5 for years. Then he moved on."
+    pieces = [text[start:end] for start, end in split_sentences(text)]
+    assert pieces == ["He lived at No. 5 for years.", "Then he moved on."]
+
+
 def test_clock_round_trips():
     assert format_clock(3661.5) == "1:01:01.500"
     assert format_clock(59.9996) == "0:01:00.000"
