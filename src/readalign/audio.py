@@ -7,6 +7,7 @@ against those prepared files, so the clock values always describe the audio the 
 
 from __future__ import annotations
 
+import glob as globlib
 import json
 import os
 import re
@@ -140,6 +141,23 @@ def _reject_drm(path: str, probe: dict | None = None) -> None:
 
 def discover_inputs(path: str) -> list[str]:
     """Return the audio files to use, in playback order."""
+    if globlib.has_magic(path):
+        # The shell does not expand patterns handed to a native command on Windows, so the
+        # glob has to be read here rather than left to argv.
+        matches = [match for match in globlib.glob(path) if os.path.isfile(match)]
+        for match in matches:
+            _reject_drm(match)
+        entries = [
+            match
+            for match in matches
+            if os.path.splitext(match)[1].lower() in AUDIO_EXTENSIONS
+        ]
+        if not entries:
+            raise InputError(
+                f"--audio matched no audio files: {path} "
+                f"(expected one of {', '.join(sorted(AUDIO_EXTENSIONS))})"
+            )
+        return sorted(entries, key=natural_key)
     if not os.path.exists(path):
         raise InputError(f"audio not found: {path}")
     if os.path.isfile(path):
