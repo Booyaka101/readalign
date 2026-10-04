@@ -61,7 +61,7 @@ Two minutes of audio is not worth spinning up a GPU for, hence `--device cpu`. R
 from that command, on a cold cache:
 
 ```
-readalign 1.0.0
+readalign 1.1.0
 reading examples/aesop/aesop-two-fables.epub
   2 content documents, 18 sentences
 preparing 1 audio file(s)

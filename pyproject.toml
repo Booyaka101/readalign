@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "readalign"
-version = "1.0.0"
+version = "1.1.0"
 description = "Turn an audiobook and the matching ebook you own into one EPUB 3 with Media Overlays."
 readme = "README.md"
 requires-python = ">=3.11"

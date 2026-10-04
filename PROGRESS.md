@@ -1,12 +1,13 @@
 # readalign progress
 
-**State: v1.0.0 is complete and unpublished.** Everything in the brief is built, the suite is
-green, and both sample books build, validate and check out. A review pass since then closed the
-first deferred item (escapability), fixed text that was silently never narrated, and cut the
-memory the loader and the checker use. A second pass fixed re-runs stacking stale audio and
-manifest ids, a transcript cache that ignored `--beam-size`, sentence splitting after the word
-"no", and added `--verify` plus report excerpts (see CHANGELOG). Nothing has been pushed to a
-remote or uploaded anywhere. The next action belongs to the owner: publish to PyPI.
+**State: 1.0.0 is on PyPI; this pass prepared 1.1.0.** Everything in the brief is built, the
+suite is green, and both sample books build, validate and check out. A review pass after the
+release closed the first deferred item (escapability), fixed text that was silently never
+narrated, and cut the memory the loader and the checker use. A second pass fixed re-runs
+stacking stale audio and manifest ids, a transcript cache that ignored `--beam-size`, sentence
+splitting after the word "no", made `--audio` globs actually work and broken XML in `check` a
+finding instead of a traceback, and added `--verify` plus report excerpts (see CHANGELOG).
+1.0.0 was uploaded to PyPI on 2026-09-18 from the v1.0.0 release artefacts.
 
 Last updated 2026-10-04.
 
@@ -54,13 +55,10 @@ Each line below was run on this machine and the output read, not assumed.
 
 ## Next steps
 
-1. Publish to PyPI: `twine upload dist/*`, using the artefacts attached to the v1.0.0 release
-   rather than a fresh build, since those are the ones that were verified.
-   `https://pypi.org/pypi/readalign/json` returned 404 on 2026-09-18, so the name is free; check
-   it again just before the upload. A version number on PyPI cannot be reused, so a mistake means
-   1.0.1 rather than a re-upload. The owner does this from the phone.
-2. After publishing, confirm `pip install readalign` and `uvx readalign --version` work from a
-   machine that has never seen the source.
+1. 1.0.0 was uploaded to PyPI on 2026-09-18 (the release artefacts), so the name is taken by
+   this project and 1.0.0 can never be re-uploaded; a mistake from here means 1.1.1.
+2. After publishing 1.1.0, confirm `pip install readalign` and `uvx readalign --version` work
+   from a machine that has never seen the source.
 3. Announce wherever audiobook and accessibility people are, with the Frankenstein numbers.
 
 ## Working notes

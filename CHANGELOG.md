@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 - 2026-10-04
 
 - New: `--verify [JAR]` runs epubcheck on the result right after the build, prints its verdict,
   records it under `verify` in the report, and exits 4 when it finds errors. epubcheck needs
