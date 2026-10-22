@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import posixpath
 import shutil
@@ -53,6 +54,9 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--drift-threshold", type=float, default=DEFAULT_DRIFT, metavar="SECONDS",
                        help="fail if any sentence drifts more than this "
                             f"(default: {DEFAULT_DRIFT})")
+    build.add_argument("--min-token-match", type=float, default=0.0, metavar="FRACTION",
+                       help="exit 5 if the matched book-token fraction is below this "
+                            "(0 to 1, default: 0, disabled)")
     sidecars = build.add_mutually_exclusive_group()
     sidecars.add_argument("--sidecars", dest="sidecars", action="store_true", default=True,
                           help="write WebVTT and align.json next to the output (default)")
@@ -134,12 +138,17 @@ def run_build(args) -> int:
     started = time.monotonic()
     warnings: list[str] = []
 
-    if args.drift_threshold <= 0:
-        raise InputError("--drift-threshold must be a positive number of seconds")
+    if not math.isfinite(args.drift_threshold) or args.drift_threshold <= 0:
+        raise InputError("--drift-threshold must be a finite positive number of seconds")
+    if not math.isfinite(args.min_token_match) or not 0 <= args.min_token_match <= 1:
+        raise InputError("--min-token-match must be a finite fraction between 0 and 1")
     out_path = os.path.abspath(args.out)
     if os.path.isdir(out_path):
         raise InputError(f"--out points at a directory: {out_path}")
-    if out_path == os.path.abspath(args.epub):
+    if (os.path.normcase(os.path.realpath(out_path))
+            == os.path.normcase(os.path.realpath(args.epub))
+            or (os.path.exists(out_path) and os.path.exists(args.epub)
+                and os.path.samefile(out_path, args.epub))):
         raise InputError("--out is the same file as --epub, which would overwrite your ebook")
 
     require_ffmpeg()
@@ -241,6 +250,11 @@ def run_build(args) -> int:
             drift_threshold=args.drift_threshold,
             warnings=warnings,
             extras={"elapsed_seconds": round(time.monotonic() - started, 1),
+                    "token_match_gate": {
+                        "threshold": args.min_token_match,
+                        "passed": (result.matched_tokens / result.book_tokens
+                                   if result.book_tokens else 0.0) >= args.min_token_match,
+                    },
                     "overlay_duration": summary["total_duration"],
                     **({"verify": verification} if verification is not None else {})},
         )
@@ -286,6 +300,14 @@ def run_build(args) -> int:
             file=sys.stderr,
         )
         return 4
+    if not report["token_match_gate"]["passed"]:
+        print(
+            f"readalign: token match {report['coverage']['token_match_rate']:.1%} is below "
+            f"--min-token-match {args.min_token_match:.1%}. The EPUB was still written; "
+            "inspect readalign-report.json for unmatched regions.",
+            file=sys.stderr,
+        )
+        return 5
     return 0
 
 

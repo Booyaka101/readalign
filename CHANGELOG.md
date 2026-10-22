@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- New: `--min-token-match FRACTION` optionally gates builds on the fraction of book tokens
+  matched to narration. Values range from 0 to 1; the default 0 preserves existing behaviour.
+  A failed gate exits 5 after writing the EPUB, report and enabled sidecars. Its threshold and
+  verdict are recorded under `token_match_gate`; drift and epubcheck failures retain precedence.
+- Fixed: chapters with identical basenames in different EPUB directories could overwrite each
+  other's WebVTT sidecars. Colliding names now gain a document suffix, including case-only
+  collisions on Windows, without changing filenames for non-colliding exports.
+- Fixed: the ebook overwrite guard now recognises symbolic links, hard links and path aliases.
+- Fixed: non-finite drift thresholds such as NaN and infinity are rejected before processing.
+
 ## 1.1.0 - 2026-10-04
 
 - New: `--verify [JAR]` runs epubcheck on the result right after the build, prints its verdict,

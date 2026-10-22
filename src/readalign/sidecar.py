@@ -11,7 +11,7 @@ import contextlib
 import json
 import os
 import posixpath
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 from .align import AlignmentResult, TimedSentence
 from .audio import AudioTrack
@@ -125,11 +125,27 @@ def write_sidecars(
         for doc_index in {key[0] for key in grouped}
         if len({key[1] for key in grouped if key[0] == doc_index}) > 1
     }
-    for (doc_index, track_index), entries in sorted(grouped.items()):
-        track = by_index[track_index]
+    names = {}
+    for doc_index, track_index in sorted(grouped):
         href = doc_hrefs.get(doc_index, f"doc{doc_index}")
         stem = posixpath.splitext(posixpath.basename(href))[0]
-        name = f"{stem}.part{track_index:03d}.vtt" if doc_index in multi_track else f"{stem}.vtt"
+        names[(doc_index, track_index)] = (
+            f"{stem}.part{track_index:03d}.vtt" if doc_index in multi_track else f"{stem}.vtt"
+        )
+    # Case folding also protects exports read on case-insensitive filesystems.
+    used = {name.casefold() for name in names.values()}
+    counts = Counter(name.casefold() for name in names.values())
+    for (doc_index, track_index), entries in sorted(grouped.items()):
+        track = by_index[track_index]
+        name = names[(doc_index, track_index)]
+        if counts[name.casefold()] > 1:
+            stem = name[:-4]
+            suffix = f".doc{doc_index:03d}"
+            name = f"{stem}{suffix}.vtt"
+            while name.casefold() in used:
+                suffix += "-"
+                name = f"{stem}{suffix}.vtt"
+            used.add(name.casefold())
         path = os.path.join(directory, name)
         audio_name = audio_hrefs.get(track_index, posixpath.basename(track.href))
         write_text(path, build_vtt(entries, track, audio_name))
@@ -139,4 +155,3 @@ def write_sidecars(
     write_text(path, build_align_json(result, by_index, doc_hrefs, audio_hrefs, title=title))
     written.append(path)
     return written
-

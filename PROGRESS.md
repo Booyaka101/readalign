@@ -12,6 +12,18 @@ PyPI on 2026-09-18 from the v1.0.0 release artefacts.
 
 Last updated 2026-10-04.
 
+## October 22 review and enhancement (unreleased)
+
+- Reviewed CLI input checks, alignment/report metrics, EPUB packaging and subtitle exports.
+- Closed ebook output-alias and non-finite drift-threshold gaps; fixed colliding chapter VTT
+  filenames while preserving existing names for ordinary exports.
+- Added an opt-in `--min-token-match` quality gate, with a report verdict and exit code 5.
+- Regression coverage includes real FFmpeg preparation, EPUB writing and `check`, using a
+  synthetic transcript instead of downloading or running a speech model. No new real-book
+  transcription or official epubcheck run is claimed for this pass.
+- Local suite: 122 passed, 2 skipped (reference EPUB fixture and unavailable Windows symlink
+  privilege); lint passes. CI and PR status are tracked on the review branch, not a release.
+
 ## Verified working
 
 Each line below was run on this machine and the output read, not assumed.
