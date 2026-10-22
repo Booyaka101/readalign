@@ -11,11 +11,11 @@ import contextlib
 import json
 import os
 import posixpath
-from collections import Counter, defaultdict
+from collections import defaultdict
 
 from .align import AlignmentResult, TimedSentence
 from .audio import AudioTrack
-from .fs import ensure_directory, write_text
+from .fs import ensure_directory, unique_filenames, write_text
 
 SIDECAR_VERSION = 1
 
@@ -132,20 +132,10 @@ def write_sidecars(
         names[(doc_index, track_index)] = (
             f"{stem}.part{track_index:03d}.vtt" if doc_index in multi_track else f"{stem}.vtt"
         )
-    # Case folding also protects exports read on case-insensitive filesystems.
-    used = {name.casefold() for name in names.values()}
-    counts = Counter(name.casefold() for name in names.values())
+    names = dict(zip(names, unique_filenames(list(names.values())), strict=True))
     for (doc_index, track_index), entries in sorted(grouped.items()):
         track = by_index[track_index]
         name = names[(doc_index, track_index)]
-        if counts[name.casefold()] > 1:
-            stem = name[:-4]
-            suffix = f".doc{doc_index:03d}"
-            name = f"{stem}{suffix}.vtt"
-            while name.casefold() in used:
-                suffix += "-"
-                name = f"{stem}{suffix}.vtt"
-            used.add(name.casefold())
         path = os.path.join(directory, name)
         audio_name = audio_hrefs.get(track_index, posixpath.basename(track.href))
         write_text(path, build_vtt(entries, track, audio_name))

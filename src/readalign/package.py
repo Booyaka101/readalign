@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import os
 import posixpath
-import re
 import shutil
 import zipfile
-from urllib.parse import unquote
+import zlib
+from urllib.parse import quote, unquote
 
 from lxml import etree
 
@@ -21,9 +21,9 @@ from .audio import AudioTrack
 from .clock import format_clock
 from .epub import OPF_NS, EpubPackage, ManifestItem, local_name
 from .errors import InputError
-from .fs import ensure_directory
+from .fs import atomic_output, ensure_directory, unique_filenames
 from .members import Member, MemberReader, SourceFile
-from .smil import build_smil, overlay_duration
+from .smil import build_smil, overlay_duration, relative_href
 
 AUDIO_DIR = "audio"
 OVERLAY_DIR = "media-overlays"
@@ -43,13 +43,6 @@ _MEDIA_TYPES_BY_SUFFIX = {
     ".m4a": "audio/mp4",
     ".opus": "audio/ogg; codecs=opus",
 }
-
-#: The member names build_output gives its audio, e.g. ``audio/part007.m4a``. Matching this
-#: pattern is what lets a re-run recognise the files a previous run embedded.
-_AUDIO_NAME_RE = re.compile(
-    r"audio/part\d{3}\.(?:" + "|".join(s.lstrip(".") for s in _MEDIA_TYPES_BY_SUFFIX) + ")"
-)
-
 
 def _manifest_element(package: EpubPackage) -> etree._Element:
     root = package.opf_tree.getroot()
@@ -93,10 +86,24 @@ def _add_manifest_item(
 
 def _is_previous_audio(package: EpubPackage, zip_path: str) -> bool:
     """Whether an archive member is audio a previous readalign run embedded."""
-    prefix = f"{package.opf_dir}/" if package.opf_dir else ""
-    if not zip_path.startswith(prefix):
-        return False
-    return _AUDIO_NAME_RE.fullmatch(zip_path[len(prefix):]) is not None
+    return any(
+        item.id.startswith("readalign-audio-") and item.media_type.startswith("audio/")
+        and package.resolve(item.href) == zip_path
+        for item in package.manifest.values()
+    )
+
+
+def _free_resource_href(package: EpubPackage, files: Member, href: str) -> str:
+    """Do not overwrite unrelated resources that happen to use a generated filename."""
+    reserved = {path.casefold() for path in files}
+    reserved.update(package.resolve(item.href).casefold() for item in package.manifest.values())
+    stem, extension = posixpath.splitext(href)
+    candidate = href
+    suffix = 2
+    while package.resolve(candidate).casefold() in reserved:
+        candidate = f"{stem}.{suffix}{extension}"
+        suffix += 1
+    return candidate
 
 
 def _strip_previous_run(package: EpubPackage, manifest: etree._Element) -> set[str]:
@@ -148,22 +155,25 @@ def _links_to(doc, css_path: str) -> list[etree._Element]:
 
 
 def _strip_previous_stylesheet(
-    package: EpubPackage, manifest: etree._Element, css_path: str
-) -> None:
+    package: EpubPackage, manifest: etree._Element
+) -> set[str]:
     """Drop an earlier run's stylesheet, so re-running replaces the link rather than stacking."""
+    removed = set()
     for item in list(package.manifest.values()):
-        if item.media_type == "text/css" and package.resolve(item.href) == css_path:
+        if item.media_type == "text/css" and item.id.startswith("readalign-css"):
+            css_path = package.resolve(item.href)
             manifest.remove(item.element)
             package.manifest.pop(item.id, None)
-    for doc in package.docs:
-        for link in _links_to(doc, css_path):
-            link.getparent().remove(link)
+            removed.add(css_path)
+            for doc in package.docs:
+                for link in _links_to(doc, css_path):
+                    link.getparent().remove(link)
+    return removed
 
 
 def _inject_stylesheet(
     package: EpubPackage, manifest: etree._Element, href: str, css_path: str
 ) -> None:
-    _strip_previous_stylesheet(package, manifest, css_path)
     _add_manifest_item(package, manifest, _free_id(package, "readalign-css"), href, "text/css")
     for doc in package.docs:
         root = doc.tree.getroot()
@@ -177,7 +187,7 @@ def _inject_stylesheet(
         link = etree.SubElement(head, f"{namespace}link")
         link.set("rel", "stylesheet")
         link.set("type", "text/css")
-        link.set("href", posixpath.relpath(css_path, posixpath.dirname(doc.zip_path)))
+        link.set("href", relative_href(doc.zip_path, css_path))
 
 
 def build_output(
@@ -192,6 +202,7 @@ def build_output(
     metadata = _metadata_element(package)
     _drop_existing_overlay_metadata(metadata)
     previous = _strip_previous_run(package, manifest)
+    previous.update(_strip_previous_stylesheet(package, manifest))
 
     by_index = {track.index: track for track in tracks}
     used_tracks = sorted(
@@ -199,18 +210,18 @@ def build_output(
     )
     audio_paths: dict[int, str] = {}
     audio_hrefs: dict[int, str] = {}
-    # A previous run's audio is dropped even without a manifest item, so nothing dead rides
-    # along when this run embeds different files.
+    # A filename alone does not establish ownership of the ebook's existing resources.
     files: Member = {
         name: data
         for name, data in package.files.items()
-        if name not in previous and not _is_previous_audio(package, name)
+        if name not in previous
     }
 
     for index in used_tracks:
         track = by_index[index]
         suffix = os.path.splitext(track.path)[1].lower()
-        href = posixpath.join(AUDIO_DIR, f"part{index:03d}{suffix}")
+        href = _free_resource_href(package, files, posixpath.join(AUDIO_DIR,
+                                                               f"part{index:03d}{suffix}"))
         zip_path = package.resolve(href)
         audio_paths[index] = zip_path
         audio_hrefs[index] = href
@@ -223,19 +234,22 @@ def build_output(
             _MEDIA_TYPES_BY_SUFFIX.get(suffix, track.media_type),
         )
 
-    css_href = posixpath.join("css", "readalign.css")
+    css_href = _free_resource_href(package, files, posixpath.join("css", "readalign.css"))
     css_path = package.resolve(css_href)
     files[css_path] = ACTIVE_CLASS_CSS.encode("utf-8")
     _inject_stylesheet(package, manifest, css_href, css_path)
 
     overlays: list[tuple[str, float]] = []
     total = 0.0
-    for doc in package.docs:
+    overlay_names = unique_filenames([
+        posixpath.splitext(posixpath.basename(doc.zip_path))[0] + ".smil"
+        for doc in package.docs
+    ])
+    for doc, name in zip(package.docs, overlay_names, strict=True):
         entries = entries_by_doc.get(doc.manifest_id) or []
         if not entries:
             continue
-        stem = posixpath.splitext(posixpath.basename(doc.href))[0]
-        href = posixpath.join(OVERLAY_DIR, f"{stem}.smil")
+        href = _free_resource_href(package, files, quote(posixpath.join(OVERLAY_DIR, name)))
         smil_path = package.resolve(href)
         files[smil_path] = build_smil(smil_path, doc.zip_path, entries, by_index, audio_paths)
         overlay_id = _free_id(package, f"readalign-smil-{doc.manifest_id}")
@@ -282,30 +296,35 @@ def write_epub(path: str, files: Member, original_order: list[str]) -> None:
     ensure_directory(os.path.dirname(os.path.abspath(path)))
 
     try:
-        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive, MemberReader() as read:
-            for name in ordered:
-                data = files[name]
-                if name == "mimetype":
-                    # OCF requires the first entry to be an uncompressed "mimetype".
-                    info = zipfile.ZipInfo("mimetype")
-                    info.compress_type = zipfile.ZIP_STORED
-                    info.external_attr = 0o644 << 16
-                    archive.writestr(info, data)
-                    continue
-                info = zipfile.ZipInfo(name)
-                info.external_attr = 0o644 << 16
-                info.compress_type = (
-                    zipfile.ZIP_STORED
-                    if posixpath.splitext(name)[1].lower() in _MEDIA_TYPES_BY_SUFFIX
-                    else zipfile.ZIP_DEFLATED
-                )
-                if isinstance(data, bytes):
-                    archive.writestr(info, data)
-                else:
-                    with read.open(data) as source, archive.open(info, "w") as target:
-                        shutil.copyfileobj(source, target, 1 << 20)
-    except OSError as exc:
+        with atomic_output(path) as temporary:
+            _write_archive(temporary, files, ordered)
+    except (OSError, zipfile.BadZipFile, zlib.error, NotImplementedError, RuntimeError) as exc:
         raise InputError(f"cannot write {path}: {exc}") from exc
+
+
+def _write_archive(path: str, files: Member, ordered: list[str]) -> None:
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive, MemberReader() as read:
+        for name in ordered:
+            data = files[name]
+            if name == "mimetype":
+                # OCF requires the first entry to be an uncompressed "mimetype".
+                info = zipfile.ZipInfo("mimetype")
+                info.compress_type = zipfile.ZIP_STORED
+                info.external_attr = 0o644 << 16
+                archive.writestr(info, data)
+                continue
+            info = zipfile.ZipInfo(name)
+            info.external_attr = 0o644 << 16
+            info.compress_type = (
+                zipfile.ZIP_STORED
+                if posixpath.splitext(name)[1].lower() in _MEDIA_TYPES_BY_SUFFIX
+                else zipfile.ZIP_DEFLATED
+            )
+            if isinstance(data, bytes):
+                archive.writestr(info, data)
+            else:
+                with read.open(data) as source, archive.open(info, "w") as target:
+                    shutil.copyfileobj(source, target, 1 << 20)
 
 
 def ensure_mimetype(files: Member) -> None:

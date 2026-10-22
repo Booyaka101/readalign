@@ -14,15 +14,23 @@ Last updated 2026-10-04.
 
 ## October 22 review and enhancement (unreleased)
 
-- Reviewed CLI input checks, alignment/report metrics, EPUB packaging and subtitle exports.
+- Reviewed CLI input checks, archive/XML handling, audio preparation, transcription/cache,
+  alignment, optional refinement, EPUB packaging, validation and subtitle exports.
 - Closed ebook output-alias and non-finite drift-threshold gaps; fixed colliding chapter VTT
   filenames while preserving existing names for ordinary exports.
 - Added an opt-in `--min-token-match` quality gate, with a report verdict and exit code 5.
-- Regression coverage includes real FFmpeg preparation, EPUB writing and `check`, using a
-  synthetic transcript instead of downloading or running a speech model. No new real-book
-  transcription or official epubcheck run is claimed for this pass.
-- Local suite: 122 passed, 2 skipped (reference EPUB fixture and unavailable Windows symlink
-  privilege); lint passes. CI and PR status are tracked on the review branch, not a release.
+- Follow-up fixes cover overlay/resource collisions, encoded URLs, audio-content cache identity,
+  malformed cache entries, atomic writes, work-directory aliases and stricter validation.
+  Added `--report PATH` for independently named batch reports.
+- Local suite with the reference EPUB: 163 passed, 1 skipped (Windows symlink privilege).
+  Lint passes. New regressions exercise failure preservation and invalid package relationships.
+- Ran the actual Aesop narration through the locally cached tiny.en model on CPU, with cache
+  disabled: 18/18 sentences, 95.1% token match, max drift 0.00s. epubcheck 5.2.1 reported zero
+  errors/warnings; `readalign check` found zero errors/warnings and probed the embedded audio.
+  The custom report path and 0.9 token-match gate both succeeded.
+- No new long-book/GPU transcription or real-reader playback test, and no optional MMS model
+  execution. Those remain limits of this review, not claimed verification.
+- Work remains on PR #1; no version bump, merge or release.
 
 ## Verified working
 

@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import zipfile
+from urllib.parse import quote
 
 import pytest
 from lxml import etree
@@ -309,3 +310,112 @@ def test_every_sentence_still_gets_exactly_one_par(tmp_path):
         for text in root.iter(f"{{{SMIL_NS}}}text")
     ]
     assert srcs == [entry.sentence.fragment_id for entry in result.timed]
+
+
+@pytest.mark.skipif(not has_ffmpeg, reason="ffmpeg and ffprobe are needed")
+def test_nested_chapters_with_reserved_url_characters_keep_distinct_overlays(aligned, tmp_path):
+    package, _, tracks, entries = aligned
+    for index, doc in enumerate(package.docs):
+        package.files.pop(doc.zip_path)
+        doc.zip_path = f"EPUB/volume{index}/Chapter #1%.xhtml"
+        doc.href = quote(f"volume{index}/Chapter #1%.xhtml")
+        item = package.manifest[doc.manifest_id]
+        item.href = doc.href
+        item.element.set("href", doc.href)
+    files, summary = build_output(package, entries, tracks)
+    smils = [name for name in files if name.endswith(".smil")]
+    assert len(smils) == len(set(smils)) == summary["overlays"] == 2
+    for name in smils:
+        root = etree.fromstring(files[name])
+        src = root.find(f".//{{{SMIL_NS}}}text").get("src")
+        assert "%23" in src and "%25" in src and "%20" in src
+    out = str(tmp_path / "nested.epub")
+    ensure_mimetype(files)
+    write_epub(out, files, package.order)
+    assert check_epub(out)["ok"]
+
+
+def _unmanifested_audio(files, package):
+    opf = etree.fromstring(files[package.opf_path])
+    for item in list(opf.iter(f"{{{OPF_NS}}}item")):
+        if (item.get("media-type") or "").startswith("audio/"):
+            item.getparent().remove(item)
+    files[package.opf_path] = etree.tostring(opf)
+
+
+def _wrong_total(files, package):
+    opf = etree.fromstring(files[package.opf_path])
+    for meta in opf.iter(f"{{{OPF_NS}}}meta"):
+        if meta.get("property") == "media:duration" and not meta.get("refines"):
+            meta.text = "99:00:00.000"
+    files[package.opf_path] = etree.tostring(opf)
+
+
+def _empty_smil(files, package):
+    name = next(name for name in files if name.endswith(".smil"))
+    files[name] = f'<smil xmlns="{SMIL_NS}" version="3.0"><body/></smil>'.encode()
+
+
+def _foreign_document(files, package):
+    name = next(name for name in files if name.endswith("chapter1.smil"))
+    files[name] = files[name].replace(b"chapter1.xhtml", b"chapter2.xhtml")
+
+
+@pytest.mark.skipif(not has_ffmpeg, reason="ffmpeg is needed")
+@pytest.mark.parametrize("mutate,expected", [
+    (_unmanifested_audio, "not a manifested audio"),
+    (_wrong_total, "package media:duration declares"),
+    (_empty_smil, "no SMIL par"),
+    (_foreign_document, "outside its associated document"),
+])
+def test_checker_rejects_invalid_package_relationships(aligned, tmp_path, mutate, expected):
+    package, _, tracks, entries = aligned
+    files, _ = build_output(package, entries, tracks)
+    mutate(files, package)
+    out = str(tmp_path / "invalid.epub")
+    ensure_mimetype(files)
+    write_epub(out, files, package.order)
+    findings = check_epub(out, probe_audio=False)
+    assert not findings["ok"]
+    assert any(expected in error for error in findings["errors"])
+
+
+def test_audio_probe_never_uses_archive_names_as_os_paths(tmp_path, monkeypatch):
+    from readalign import audio
+    from readalign.cli import _probe_clip_ends
+
+    archive_path = tmp_path / "hostile.epub"
+    hostile_name = "D:escaped.mp3"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        info = zipfile.ZipInfo("placeholder")
+        info.filename = hostile_name
+        archive.writestr(info, b"audio")
+
+    def probe(path):
+        assert os.path.basename(path) == "audio-0000"
+        assert os.path.isfile(path)
+        return {"format": {"duration": "10"}, "streams": [{"codec_type": "audio"}]}
+
+    monkeypatch.setattr(audio, "ffprobe", probe)
+    with zipfile.ZipFile(archive_path) as archive:
+        errors = []
+        result = _probe_clip_ends(archive, {hostile_name: 9.0}, errors, [])
+    assert result == {hostile_name: 10.0}
+    assert not errors
+
+
+def test_generated_resources_preserve_unrelated_existing_audio_and_css(aligned):
+    from readalign.package import _add_manifest_item, _manifest_element
+
+    package, _, tracks, entries = aligned
+    manifest = _manifest_element(package)
+    originals = {"EPUB/audio/part001.mp3": b"original embedded audio",
+                 "EPUB/css/readalign.css": b"original ebook stylesheet"}
+    package.files.update(originals)
+    _add_manifest_item(package, manifest, "original-audio", "audio/part001.mp3", "audio/mpeg")
+    _add_manifest_item(package, manifest, "original-css", "css/readalign.css", "text/css")
+    files, summary = build_output(package, entries, tracks)
+    assert all(files[name] == data for name, data in originals.items())
+    assert summary["audio_hrefs"][1] == "audio/part001.2.mp3"
+    assert "EPUB/css/readalign.2.css" in files
+    assert {"original-audio", "original-css"} <= set(package.manifest)

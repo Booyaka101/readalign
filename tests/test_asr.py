@@ -6,6 +6,7 @@ import pytest
 
 from conftest import make_tracks
 from readalign import asr
+from readalign.audio import Chapter
 from readalign.errors import DependencyError
 
 CUBLAS = "Library cublas64_12.dll is not found or cannot be loaded"
@@ -109,6 +110,56 @@ def test_the_cache_key_covers_every_setting_that_changes_the_transcript(tmp_path
     assert asr._cache_key(track, "tiny", None, True, 5, 1800.0) != base
     assert asr._cache_key(track, "tiny", "de", True, 5, 3600.0) != base
     assert asr._cache_key(track, "tiny", None, False, 5, 3600.0) != base
+
+
+def test_cache_identity_uses_audio_bytes_and_chapter_plan(tmp_path):
+    track = one_track(tmp_path)[0]
+    original = asr._cache_key(track, "tiny", None, True, 5, 3600.0)
+    audio = tmp_path / "part001.mp3"
+    data = audio.read_bytes()
+    audio.write_bytes(b"X" * len(data))
+    assert asr._cache_key(track, "tiny", None, True, 5, 3600.0) != original
+    audio.write_bytes(data)
+    track.chapters = [Chapter(0.0, 5.0, "One"), Chapter(5.0, 10.0, "Two")]
+    assert asr._cache_key(track, "tiny", None, True, 5, 3600.0) != original
+
+
+@pytest.mark.parametrize("data", [
+    None, 7, "words", {"words": None}, {"words": [], "language": 9},
+    {"words": [{"text": 7, "start": 0, "end": 1, "probability": 1}]},
+    {"words": [{"text": "x", "start": "0", "end": 1, "probability": 1}]},
+    {"words": [{"text": "x", "start": 0, "end": float("nan"), "probability": 1}]},
+    {"words": [{"text": "x", "start": 2, "end": 1, "probability": 1}]},
+    {"words": [{"text": "x", "start": 0, "end": 1, "probability": 2}]},
+])
+def test_malformed_cache_is_a_miss_not_a_crash(tmp_path, data):
+    (tmp_path / "key.json").write_text(json.dumps(data), encoding="utf-8")
+    assert asr._load_cached(str(tmp_path), "key") is None
+
+
+def test_non_utf8_cache_is_ignored(tmp_path):
+    (tmp_path / "key.json").write_bytes(b"\xff")
+    assert asr._load_cached(str(tmp_path), "key") is None
+
+
+def test_cached_language_affects_following_track_cache_key(tmp_path, monkeypatch):
+    recogniser(monkeypatch, detected="en")
+    first = one_track(tmp_path)[0]
+    second = make_tracks([10.0, 10.0])[1]
+    second.path = first.path
+    cache = tmp_path / "cache"
+    _, initial = run([first, second], cache)
+    assert initial["cached_tracks"] == 0
+    _, again = run([first, second], cache)
+    assert again["cached_tracks"] == 2
+    recogniser(monkeypatch, detected="de")
+    _, changed = asr.transcribe_tracks(
+        [first, second], model_name="tiny", language="de",
+        cache_dir=str(cache), log=lambda *_: None,
+    )
+    # Both recordings now have an explicitly selected language and cannot use the English cache.
+    # The identical second track reuses the just-written German entry.
+    assert changed["cached_tracks"] == 1
 
 
 def test_a_cache_write_failure_is_reported_through_the_log(tmp_path, capsys):

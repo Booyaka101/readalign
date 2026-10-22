@@ -191,7 +191,9 @@ take precedence over this gate when more than one check fails.
    EPUB 3 only takes MP3, MP4 audio and Opus; MP3, M4A/M4B and Opus are stream-copied, so no
    audio is re-encoded unless it has to be.
 2. **faster-whisper** transcribes with word timestamps. Transcripts are cached per file, keyed by
-   content and settings, so a second run over the same audiobook costs nothing.
+   a streamed SHA-256 of the prepared audio, chapter boundaries and recogniser settings.
+   A second run avoids transcription, but still prepares and hashes the audio. Older cache keys
+   are invalidated once; malformed entries are ignored and rebuilt.
 3. Both sides are normalised to comparable tokens: case folded, accents stripped, punctuation
    dropped, digits and roman numerals spelled out ("Chapter XVIII" and "chapter eighteen" become
    the same tokens).
@@ -215,6 +217,7 @@ take precedence over this gate when more than one check fails.
 --audio PATH             a file, a directory of numbered files, or a glob
 --epub PATH              the matching DRM-free EPUB
 --out PATH               the EPUB to write
+--report PATH            JSON report path (default: readalign-report.json beside --out)
 --model NAME             faster-whisper model (default: large-v3-turbo)
 --language CODE          ISO code of the narration (default: detect)
 --drift-threshold SECS   exit 3 if any sentence drifts more than this (default: 2.5)

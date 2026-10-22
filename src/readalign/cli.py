@@ -16,10 +16,12 @@ import sys
 import tempfile
 import time
 import zipfile
+import zlib
 from urllib.parse import unquote
 
 from . import __version__
 from .errors import InputError, ReadAlignError
+from .fs import ensure_directory, same_path
 from .members import open_archive
 
 DEFAULT_MODEL = "large-v3-turbo"
@@ -47,6 +49,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="audio file, or a directory of numbered files, or a glob")
     build.add_argument("--epub", required=True, help="the matching DRM-free EPUB")
     build.add_argument("--out", required=True, help="path of the EPUB to write")
+    build.add_argument("--report", default=None, metavar="PATH",
+                       help="JSON report path (default: readalign-report.json beside --out)")
     build.add_argument("--model", default=DEFAULT_MODEL,
                        help=f"faster-whisper model (default: {DEFAULT_MODEL})")
     build.add_argument("--language", default=None,
@@ -142,14 +146,33 @@ def run_build(args) -> int:
         raise InputError("--drift-threshold must be a finite positive number of seconds")
     if not math.isfinite(args.min_token_match) or not 0 <= args.min_token_match <= 1:
         raise InputError("--min-token-match must be a finite fraction between 0 and 1")
+    if args.beam_size < 1:
+        raise InputError("--beam-size must be a positive integer")
     out_path = os.path.abspath(args.out)
     if os.path.isdir(out_path):
         raise InputError(f"--out points at a directory: {out_path}")
-    if (os.path.normcase(os.path.realpath(out_path))
-            == os.path.normcase(os.path.realpath(args.epub))
-            or (os.path.exists(out_path) and os.path.exists(args.epub)
-                and os.path.samefile(out_path, args.epub))):
+    if same_path(out_path, args.epub):
         raise InputError("--out is the same file as --epub, which would overwrite your ebook")
+    report_path = os.path.abspath(args.report) if args.report else os.path.join(
+        os.path.dirname(out_path), "readalign-report.json"
+    )
+    if os.path.isdir(report_path):
+        raise InputError(f"--report points at a directory: {report_path}")
+    if same_path(report_path, args.epub) or same_path(report_path, out_path):
+        raise InputError("--report would overwrite the input or output EPUB")
+    directory = os.path.join(os.path.dirname(out_path),
+                             os.path.splitext(os.path.basename(out_path))[0] + "-sidecars")
+    if args.sidecars:
+        sidecar_root = os.path.normcase(os.path.realpath(directory))
+        report_real = os.path.normcase(os.path.realpath(report_path))
+        if report_real == sidecar_root or report_real.startswith(sidecar_root + os.sep):
+            raise InputError("--report must be outside the generated sidecar directory")
+
+    verification_tool = None
+    if args.verify and not args.dry_run:
+        from .verify import find_epubcheck
+
+        verification_tool = find_epubcheck(args.verify)
 
     require_ffmpeg()
     log(f"readalign {__version__}")
@@ -164,11 +187,18 @@ def run_build(args) -> int:
     log(f"  {len(package.docs)} content documents, {len(sentences)} sentences")
 
     sources = discover_inputs(args.audio)
+    for source in sources:
+        if same_path(out_path, source) or same_path(report_path, source):
+            raise InputError(f"an output path would overwrite source audio: {source}")
     log(f"preparing {len(sources)} audio file(s)")
     work_dir = args.work_dir or tempfile.mkdtemp(prefix="readalign-")
     temporary = args.work_dir is None
-    os.makedirs(work_dir, exist_ok=True)
+    ensure_directory(work_dir, "work directory")
     try:
+        for index in range(1, len(sources) + 1):
+            wav_path = os.path.join(work_dir, "wav", f"part{index:03d}.wav")
+            if any(same_path(wav_path, source) for source in [args.epub, *sources]):
+                raise InputError(f"the work directory would overwrite an input: {wav_path}")
         tracks = prepare_tracks(sources, work_dir, args.audio_bitrate, log=log)
         if args.dry_run:
             return _dry_run_plan(package, tracks, log)
@@ -226,11 +256,10 @@ def run_build(args) -> int:
 
         verification = None
         if args.verify:
-            from .verify import find_epubcheck, run_epubcheck
+            from .verify import run_epubcheck
 
-            tool = find_epubcheck(args.verify)
             log("verifying with epubcheck")
-            verification = run_epubcheck(out_path, tool, log=log)
+            verification = run_epubcheck(out_path, verification_tool, log=log)
 
         stats = document_stats(package, result)
         for doc in package.docs:
@@ -258,16 +287,11 @@ def run_build(args) -> int:
                     "overlay_duration": summary["total_duration"],
                     **({"verify": verification} if verification is not None else {})},
         )
-        report_path = os.path.join(os.path.dirname(out_path) or ".", "readalign-report.json")
         write_report(report_path, report)
 
         if args.sidecars:
             from .sidecar import write_sidecars
 
-            directory = os.path.join(
-                os.path.dirname(out_path) or ".",
-                os.path.splitext(os.path.basename(out_path))[0] + "-sidecars",
-            )
             written = write_sidecars(
                 directory, result, tracks,
                 {index: doc.href for index, doc in enumerate(package.docs)},
@@ -289,14 +313,14 @@ def run_build(args) -> int:
         print(
             f"readalign: max drift {report['drift']['max']:.2f}s exceeds the "
             f"--drift-threshold of {args.drift_threshold:.2f}s. The EPUB was still written; "
-            f"check readalign-report.json for where it slipped.",
+            f"check {report_path} for where it slipped.",
             file=sys.stderr,
         )
         return 3
     if verification is not None and not verification["ok"]:
         print(
             "readalign: epubcheck reported problems with the output; the lines above are its "
-            "own. See the verify section of readalign-report.json.",
+            f"own. See the verify section of {report_path}.",
             file=sys.stderr,
         )
         return 4
@@ -304,7 +328,7 @@ def run_build(args) -> int:
         print(
             f"readalign: token match {report['coverage']['token_match_rate']:.1%} is below "
             f"--min-token-match {args.min_token_match:.1%}. The EPUB was still written; "
-            "inspect readalign-report.json for unmatched regions.",
+            f"inspect {report_path} for unmatched regions.",
             file=sys.stderr,
         )
         return 5
@@ -326,7 +350,8 @@ def _open_package(archive, path: str):
     if "META-INF/container.xml" not in names:
         raise InputError(f"{path} has no META-INF/container.xml, so it is not an EPUB")
     try:
-        container = etree.fromstring(archive.read("META-INF/container.xml"))
+        container = etree.fromstring(archive.read("META-INF/container.xml"),
+                                     etree.XMLParser(resolve_entities=False))
     except etree.XMLSyntaxError as exc:
         raise InputError(
             f"{path}: META-INF/container.xml is not well-formed XML: {exc}"
@@ -338,7 +363,8 @@ def _open_package(archive, path: str):
     if opf_path not in names:
         raise InputError(f"{path} names a package document that is missing: {opf_path}")
     try:
-        return opf_path, etree.fromstring(archive.read(opf_path))
+        return opf_path, etree.fromstring(archive.read(opf_path),
+                                         etree.XMLParser(resolve_entities=False))
     except etree.XMLSyntaxError as exc:
         raise InputError(
             f"{path}: the package document {opf_path} is not well-formed XML: {exc}"
@@ -389,18 +415,19 @@ def _fragment_ids(
 def _probe_clip_ends(archive, max_clip_end: dict[str, float], errors: list[str],
                      warnings: list[str]) -> dict[str, float]:
     """Acceptance check: no clipEnd may sit past the real duration ffprobe reports."""
-    from .audio import ffprobe
+    from .audio import _duration_of, ffprobe
 
     durations: dict[str, float] = {}
     with tempfile.TemporaryDirectory(prefix="readalign-check-") as scratch:
-        for audio_path, clip_end in sorted(max_clip_end.items()):
-            extracted = os.path.join(scratch, posixpath.basename(audio_path))
+        for index, (audio_path, clip_end) in enumerate(sorted(max_clip_end.items())):
+            # Archive names are URL paths, not trusted OS filenames (especially on Windows).
+            extracted = os.path.join(scratch, f"audio-{index:04d}")
             with archive.open(audio_path) as source, open(extracted, "wb") as handle:
                 shutil.copyfileobj(source, handle, 1 << 20)
             try:
-                duration = float(ffprobe(extracted)["format"]["duration"])
+                duration = _duration_of(ffprobe(extracted), audio_path)
             except (ReadAlignError, KeyError, ValueError, TypeError) as exc:
-                warnings.append(f"could not probe {audio_path}: {exc}")
+                errors.append(f"could not probe {audio_path}: {exc}")
                 continue
             durations[audio_path] = round(duration, 3)
             if clip_end > duration + 0.05:
@@ -413,6 +440,13 @@ def _probe_clip_ends(archive, max_clip_end: dict[str, float], errors: list[str],
 
 def check_epub(path: str, *, probe_audio: bool = True) -> dict:
     """Validate the media overlays of an EPUB. Structural faults are reported, not raised."""
+    try:
+        return _check_epub(path, probe_audio=probe_audio)
+    except (zipfile.BadZipFile, zlib.error, NotImplementedError, RuntimeError) as exc:
+        raise InputError(f"{path} is not a readable EPUB: {exc}") from None
+
+
+def _check_epub(path: str, *, probe_audio: bool) -> dict:
     from lxml import etree
 
     from .clock import parse_clock
@@ -423,6 +457,8 @@ def check_epub(path: str, *, probe_audio: bool = True) -> dict:
     warnings: list[str] = []
     with open_archive(path) as archive:
         names = set(archive.namelist())
+        if len(names) != len(archive.namelist()):
+            errors.append("the archive contains duplicate member names")
         entries = archive.infolist()
         if not entries or entries[0].filename != "mimetype":
             errors.append("the first archive entry is not 'mimetype'")
@@ -433,6 +469,13 @@ def check_epub(path: str, *, probe_audio: bool = True) -> dict:
 
         opf_path, opf = _open_package(archive, path)
         items = {item.get("id"): item for item in opf.iter(f"{{{OPF_NS}}}item") if item.get("id")}
+        manifest_items = list(opf.iter(f"{{{OPF_NS}}}item"))
+        if len(items) != len(manifest_items):
+            errors.append("the manifest has missing or duplicate item ids")
+        manifested = {
+            _resolve(opf_path, item.get("href", "")): item.get("media-type", "")
+            for item in items.values()
+        }
         spine = [ref.get("idref") for ref in opf.iter(f"{{{OPF_NS}}}itemref") if ref.get("idref")]
         for idref in spine:
             if idref not in items:
@@ -470,12 +513,17 @@ def check_epub(path: str, *, probe_audio: bool = True) -> dict:
             if overlay_id not in durations:
                 warnings.append(f"overlay '{overlay_id}' has no media:duration metadata")
             try:
-                smil = etree.fromstring(archive.read(smil_path))
+                smil = etree.fromstring(archive.read(smil_path),
+                                         etree.XMLParser(resolve_entities=False))
             except etree.XMLSyntaxError as exc:
                 errors.append(f"{smil_path}: the overlay is not well-formed XML: {exc}")
                 continue
             overlay_clip = 0.0
-            for par in smil.iter(f"{{{SMIL_NS}}}par"):
+            overlay_pars = list(smil.iter(f"{{{SMIL_NS}}}par"))
+            if smil.tag != f"{{{SMIL_NS}}}smil" or not overlay_pars:
+                errors.append(f"{smil_path}: overlay has no SMIL par elements")
+            expected_document = _resolve(opf_path, item.get("href", ""))
+            for par in overlay_pars:
                 pars += 1
                 text = par.find(f"{{{SMIL_NS}}}text")
                 audio = par.find(f"{{{SMIL_NS}}}audio")
@@ -485,6 +533,10 @@ def check_epub(path: str, *, probe_audio: bool = True) -> dict:
                 src = text.get("src")
                 doc_path = _resolve(smil_path, src)
                 fragment = unquote(src.split("#", 1)[1]) if "#" in src else ""
+                if doc_path != expected_document:
+                    errors.append(f"{smil_path}: text points outside its associated document")
+                if manifested.get(doc_path) not in {"application/xhtml+xml", "image/svg+xml"}:
+                    errors.append(f"{smil_path}: text target is not a manifested content document")
                 if doc_path not in names:
                     errors.append(f"{smil_path}: text points at a missing document {doc_path}")
                 elif fragment:
@@ -495,6 +547,8 @@ def check_epub(path: str, *, probe_audio: bool = True) -> dict:
                     errors.append(f"{smil_path}: a par has no audio src")
                     continue
                 audio_path = _resolve(smil_path, audio.get("src"))
+                if not manifested.get(audio_path, "").startswith("audio/"):
+                    errors.append(f"{smil_path}: audio target is not a manifested audio file")
                 if audio_path not in names:
                     errors.append(f"{smil_path}: audio points at a missing file {audio_path}")
                     continue
@@ -511,7 +565,7 @@ def check_epub(path: str, *, probe_audio: bool = True) -> dict:
             clip_total += overlay_clip
             declared = durations.get(overlay_id)
             if declared is not None and abs(declared - overlay_clip) > 1.0:
-                warnings.append(
+                errors.append(
                     f"overlay '{overlay_id}' declares {declared:.3f}s but its clips total "
                     f"{overlay_clip:.3f}s"
                 )
@@ -525,6 +579,11 @@ def check_epub(path: str, *, probe_audio: bool = True) -> dict:
             errors.append("no spine document has a media-overlay attribute")
         if total_meta is None and overlays:
             warnings.append("the package has no unrefined media:duration for the whole book")
+        elif total_meta is not None and abs(total_meta - clip_total) > 1.0:
+            errors.append(
+                f"package media:duration declares {total_meta:.3f}s but its clips total "
+                f"{clip_total:.3f}s"
+            )
 
     return {
         "epub": os.path.abspath(path),
