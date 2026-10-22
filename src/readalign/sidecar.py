@@ -15,7 +15,7 @@ from collections import defaultdict
 
 from .align import AlignmentResult, TimedSentence
 from .audio import AudioTrack
-from .fs import ensure_directory, write_text
+from .fs import ensure_directory, unique_filenames, write_text
 
 SIDECAR_VERSION = 1
 
@@ -125,11 +125,17 @@ def write_sidecars(
         for doc_index in {key[0] for key in grouped}
         if len({key[1] for key in grouped if key[0] == doc_index}) > 1
     }
-    for (doc_index, track_index), entries in sorted(grouped.items()):
-        track = by_index[track_index]
+    names = {}
+    for doc_index, track_index in sorted(grouped):
         href = doc_hrefs.get(doc_index, f"doc{doc_index}")
         stem = posixpath.splitext(posixpath.basename(href))[0]
-        name = f"{stem}.part{track_index:03d}.vtt" if doc_index in multi_track else f"{stem}.vtt"
+        names[(doc_index, track_index)] = (
+            f"{stem}.part{track_index:03d}.vtt" if doc_index in multi_track else f"{stem}.vtt"
+        )
+    names = dict(zip(names, unique_filenames(list(names.values())), strict=True))
+    for (doc_index, track_index), entries in sorted(grouped.items()):
+        track = by_index[track_index]
+        name = names[(doc_index, track_index)]
         path = os.path.join(directory, name)
         audio_name = audio_hrefs.get(track_index, posixpath.basename(track.href))
         write_text(path, build_vtt(entries, track, audio_name))
@@ -139,4 +145,3 @@ def write_sidecars(
     write_text(path, build_align_json(result, by_index, doc_hrefs, audio_hrefs, title=title))
     written.append(path)
     return written
-

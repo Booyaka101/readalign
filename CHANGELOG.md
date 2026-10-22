@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.2.0 - 2026-10-22
+
+- New: `--report PATH` selects a separate JSON report for each batch build, with guards
+  against overwriting input audio, the input/output EPUB or generated sidecars.
+- Fixed: colliding overlay names and URL-special characters in EPUB resource paths.
+  Generated audio and CSS also avoid overwriting unrelated existing resources.
+- Fixed: transcript cache identity now hashes prepared audio bytes and includes chapter
+  boundaries and the effective language. Malformed cached words are ignored instead of crashing.
+- Fixed: EPUB, report and cache writes replace their destinations only after a complete write.
+- Fixed: work-directory audio aliases, invalid durations, chapter marks and beam sizes are
+  rejected; missing epubcheck paths fail before transcription.
+- Fixed: `check` rejects unmanifested audio, overlays pointing outside their associated document,
+  empty overlays, duplicate manifest ids and mismatched durations. Corrupt archives produce
+  readable errors; audio-probe scratch filenames never come from archive member names.
+- New: `--min-token-match FRACTION` optionally gates builds on the fraction of book tokens
+  matched to narration. Values range from 0 to 1; the default 0 preserves existing behaviour.
+  A failed gate exits 5 after writing the EPUB, report and enabled sidecars. Its threshold and
+  verdict are recorded under `token_match_gate`; drift and epubcheck failures retain precedence.
+- Fixed: chapters with identical basenames in different EPUB directories could overwrite each
+  other's WebVTT sidecars. Colliding names now gain a numeric suffix, including case-only
+  collisions on Windows, without changing filenames for non-colliding exports.
+- Fixed: the ebook overwrite guard now recognises symbolic links, hard links and path aliases.
+- Fixed: non-finite drift thresholds such as NaN and infinity are rejected before processing.
+
 ## 1.1.0 - 2026-10-04
 
 - New: `--verify [JAR]` runs epubcheck on the result right after the build, prints its verdict,

@@ -12,6 +12,26 @@ PyPI on 2026-09-18 from the v1.0.0 release artefacts.
 
 Last updated 2026-10-04.
 
+## October 22 review and enhancement (1.2.0)
+
+- Reviewed CLI input checks, archive/XML handling, audio preparation, transcription/cache,
+  alignment, optional refinement, EPUB packaging, validation and subtitle exports.
+- Closed ebook output-alias and non-finite drift-threshold gaps; fixed colliding chapter VTT
+  filenames while preserving existing names for ordinary exports.
+- Added an opt-in `--min-token-match` quality gate, with a report verdict and exit code 5.
+- Follow-up fixes cover overlay/resource collisions, encoded URLs, audio-content cache identity,
+  malformed cache entries, atomic writes, work-directory aliases and stricter validation.
+  Added `--report PATH` for independently named batch reports.
+- Local suite with the reference EPUB: 163 passed, 1 skipped (Windows symlink privilege).
+  Lint passes. New regressions exercise failure preservation and invalid package relationships.
+- Ran the actual Aesop narration through the locally cached tiny.en model on CPU, with cache
+  disabled: 18/18 sentences, 95.1% token match, max drift 0.00s. epubcheck 5.2.1 reported zero
+  errors/warnings; `readalign check` found zero errors/warnings and probed the embedded audio.
+  The custom report path and 0.9 token-match gate both succeeded.
+- No new long-book/GPU transcription or real-reader playback test, and no optional MMS model
+  execution. Those remain limits of this review, not claimed verification.
+- Prepared version 1.2.0 through PR #1. Publication follows CI on the exact release commit.
+
 ## Verified working
 
 Each line below was run on this machine and the output read, not assumed.

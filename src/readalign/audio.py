@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import glob as globlib
 import json
+import math
 import os
 import re
 import shutil
@@ -19,6 +20,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .errors import DependencyError, DRMError, InputError
+from .fs import same_path
 
 AUDIO_EXTENSIONS = {
     ".mp3", ".m4a", ".m4b", ".mp4", ".flac", ".ogg", ".oga", ".opus", ".wav", ".aiff", ".aif",
@@ -117,9 +119,9 @@ def _duration_of(probe: dict, path: str) -> float:
         if value:
             try:
                 duration = float(value)
-            except ValueError:
+            except (TypeError, ValueError):
                 continue
-            if duration > 0:
+            if math.isfinite(duration) and duration > 0:
                 return duration
     raise InputError(f"{path} has no readable duration; is it a complete audio file?")
 
@@ -190,7 +192,7 @@ def _chapters_from(probe: dict) -> list[Chapter]:
             end = float(entry.get("end_time", 0.0))
         except (TypeError, ValueError):
             continue
-        if end <= start:
+        if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start:
             continue
         title = (entry.get("tags") or {}).get("title") or f"Chapter {len(chapters) + 1}"
         chapters.append(Chapter(start=start, end=end, title=title))
@@ -228,6 +230,8 @@ def prepare_tracks(sources: list[str], workdir: str, bitrate: str, log=print) ->
         _reject_drm(source, probe)
         suffix, media_type, transcode = _output_plan(source, probe)
         target = os.path.join(audio_dir, f"part{index:03d}{suffix}")
+        if any(same_path(target, original) for original in sources):
+            raise InputError(f"the work directory would overwrite source audio: {target}")
         label = f"[{index}/{len(sources)}] {os.path.basename(source)}"
         log(f"  {label} -> {'transcoding to AAC' if transcode else 'stream copy'}")
         command = ["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", source,
@@ -265,6 +269,8 @@ def decode_wav(track: AudioTrack, workdir: str) -> str:
     wav_dir = os.path.join(workdir, "wav")
     os.makedirs(wav_dir, exist_ok=True)
     target = os.path.join(wav_dir, f"part{track.index:03d}.wav")
+    if same_path(target, track.source):
+        raise InputError(f"the work directory would overwrite source audio: {target}")
     result = _run(
         [
             "ffmpeg", "-nostdin", "-v", "error", "-y", "-i", track.path,

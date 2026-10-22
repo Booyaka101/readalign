@@ -2,7 +2,13 @@
 
 import pytest
 
-from readalign.audio import discover_inputs, natural_key
+from readalign.audio import (
+    _chapters_from,
+    _duration_of,
+    discover_inputs,
+    natural_key,
+    prepare_tracks,
+)
 from readalign.errors import DRMError, InputError
 
 
@@ -38,3 +44,34 @@ def test_a_drm_file_a_glob_matches_is_refused(tmp_path):
     (tmp_path / "b.aax").write_bytes(b"x")
     with pytest.raises(DRMError, match=r"b\.aax"):
         discover_inputs(str(tmp_path / "*"))
+
+
+@pytest.mark.parametrize("duration", ["inf", "nan", "-1", "N/A", {}])
+def test_invalid_audio_duration_is_rejected(duration):
+    probe = {"format": {"duration": duration}, "streams": [{"codec_type": "audio"}]}
+    with pytest.raises(InputError, match="no readable duration"):
+        _duration_of(probe, "audio.mp3")
+
+
+def test_invalid_chapter_marks_are_ignored():
+    probe = {"chapters": [
+        {"start_time": "nan", "end_time": "inf"},
+        {"start_time": "-1", "end_time": "2"},
+        {"start_time": "0", "end_time": "3"},
+    ]}
+    assert len(_chapters_from(probe)) == 1
+
+
+def test_work_directory_cannot_overwrite_any_source_audio(tmp_path, monkeypatch):
+    from readalign import audio
+
+    directory = tmp_path / "audio"
+    directory.mkdir()
+    source = directory / "part001.mp3"
+    source.write_bytes(b"original")
+    monkeypatch.setattr(audio, "ffprobe", lambda path: {
+        "streams": [{"codec_type": "audio", "codec_name": "mp3"}],
+    })
+    with pytest.raises(InputError, match="overwrite source audio"):
+        prepare_tracks([str(source)], str(tmp_path), "96k", log=lambda *_: None)
+    assert source.read_bytes() == b"original"

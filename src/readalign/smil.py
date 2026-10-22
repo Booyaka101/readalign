@@ -8,6 +8,7 @@ the user skip (a footnote, a page number) or escape out of (a table, a list, a f
 from __future__ import annotations
 
 import posixpath
+from urllib.parse import quote
 
 from lxml import etree
 
@@ -24,7 +25,7 @@ _NSMAP = {None: SMIL_NS, "epub": EPUB_NS}
 def relative_href(from_path: str, to_path: str) -> str:
     """Path from one archive member to another, as a path-relative-scheme-less-URL string."""
     relative = posixpath.relpath(to_path, posixpath.dirname(from_path))
-    return relative.replace("\\", "/")
+    return quote(relative.replace("\\", "/"))
 
 
 def build_smil(
@@ -57,13 +58,13 @@ def build_smil(
         for level in chain[shared:]:
             parent = open_seqs[-1][1] if open_seqs else body
             seq = etree.SubElement(parent, f"{{{SMIL_NS}}}seq")
-            seq.set(f"{{{EPUB_NS}}}textref", f"{text_href}#{level.container_id}")
+            seq.set(f"{{{EPUB_NS}}}textref", f"{text_href}#{quote(level.container_id, safe='')}")
             seq.set(f"{{{EPUB_NS}}}type", level.epub_type)
             open_seqs.append((level.container_id, seq))
         container = open_seqs[-1][1] if open_seqs else body
         par = etree.SubElement(container, f"{{{SMIL_NS}}}par")
         text = etree.SubElement(par, f"{{{SMIL_NS}}}text")
-        text.set("src", f"{text_href}#{entry.sentence.fragment_id}")
+        text.set("src", f"{text_href}#{quote(entry.sentence.fragment_id, safe='')}")
         track = tracks[entry.track_index]
         audio = etree.SubElement(par, f"{{{SMIL_NS}}}audio")
         audio.set("src", relative_href(smil_path, audio_paths[entry.track_index]))

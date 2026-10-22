@@ -10,6 +10,7 @@ import contextlib
 import glob
 import hashlib
 import json
+import math
 import os
 import site
 import time
@@ -17,6 +18,7 @@ from dataclasses import asdict, dataclass
 
 from .audio import AudioTrack, read_wav_segment
 from .errors import DependencyError
+from .fs import atomic_output
 
 _CUDA_READY = False
 
@@ -152,13 +154,17 @@ def _cache_key(
     track: AudioTrack, model: str, language: str | None, vad: bool, beam_size: int,
     window_seconds: float,
 ) -> str:
-    stat = os.stat(track.path)
-    payload = "|".join(
-        [os.path.basename(track.source), str(stat.st_size), f"{track.duration:.3f}",
-         model, language or "auto", str(vad), f"beam{beam_size}",
-         f"window{window_seconds:g}"]
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:20]
+    digest = hashlib.sha256()
+    # Size and duration are not identities: edited tracks can retain both.
+    with open(track.path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    settings = {"version": 2, "model": model, "language": language, "vad": vad,
+                "beam_size": beam_size, "window_seconds": window_seconds,
+                "duration": track.duration,
+                "chapters": [(chapter.start, chapter.end) for chapter in track.chapters]}
+    digest.update(json.dumps(settings, sort_keys=True).encode("utf-8"))
+    return digest.hexdigest()
 
 
 def _load_cached(cache_dir: str | None, key: str) -> tuple[list[Word], str | None] | None:
@@ -169,13 +175,26 @@ def _load_cached(cache_dir: str | None, key: str) -> tuple[list[Word], str | Non
     try:
         with open(path, encoding="utf-8") as handle:
             data = json.load(handle)
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError, UnicodeError):
         return None
     try:
         # Caches written before the language was recorded are a bare list of words.
-        if isinstance(data, list):
-            return [Word(**entry) for entry in data], None
-        return [Word(**entry) for entry in data["words"]], data.get("language")
+        if not isinstance(data, (dict, list)):
+            return None
+        rows = data if isinstance(data, list) else data["words"]
+        language = None if isinstance(data, list) else data.get("language")
+        if not isinstance(rows, list) or (language is not None and not isinstance(language, str)):
+            return None
+        words = [Word(**entry) for entry in rows]
+        for word in words:
+            if not isinstance(word.text, str) or not word.text.strip():
+                return None
+            values = (word.start, word.end, word.probability)
+            if any(type(value) not in (int, float) or not math.isfinite(value) for value in values):
+                return None
+            if word.start < 0 or word.end < word.start or not 0 <= word.probability <= 1:
+                return None
+        return words, language
     except (KeyError, TypeError):
         return None
 
@@ -188,7 +207,7 @@ def _store_cached(
     try:
         os.makedirs(cache_dir, exist_ok=True)
         path = os.path.join(cache_dir, f"{key}.json")
-        with open(path, "w", encoding="utf-8") as handle:
+        with atomic_output(path) as temporary, open(temporary, "w", encoding="utf-8") as handle:
             json.dump({"language": language, "words": [asdict(w) for w in words]}, handle)
     except OSError as exc:
         log(f"  warning: could not write the transcript cache: {exc}")
@@ -220,7 +239,7 @@ def transcribe_tracks(
 
     for track in tracks:
         key = (
-            _cache_key(track, model_name, language, vad, beam_size, window_seconds)
+            _cache_key(track, model_name, settings.language, vad, beam_size, window_seconds)
             if cache_dir
             else ""
         )

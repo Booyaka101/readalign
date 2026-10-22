@@ -1,5 +1,7 @@
 """The command line surface: defaults, exit codes, and refusals that stay readable."""
 
+import json
+import os
 import shutil
 import zipfile
 
@@ -19,6 +21,7 @@ def test_defaults_match_the_documented_ones():
     assert args.sidecars is True
     assert args.dry_run is False
     assert args.language is None
+    assert args.report is None
 
 
 def test_no_sidecars_flag():
@@ -176,3 +179,114 @@ def test_negative_drift_threshold_is_refused(tmp_path, capsys):
                  "--out", str(tmp_path / "out.epub"), "--drift-threshold", "-1"])
     assert code == 1
     assert "--drift-threshold" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf", "0"])
+def test_nonfinite_or_zero_drift_threshold_is_refused(tmp_path, capsys, value):
+    code = main(["build", "--audio", "unused", "--epub", "unused",
+                 "--out", str(tmp_path / "out.epub"), f"--drift-threshold={value}"])
+    assert code == 1
+    assert "finite positive" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf", "-0.1", "1.1"])
+def test_invalid_token_match_threshold_is_refused(tmp_path, capsys, value):
+    code = main(["build", "--audio", "unused", "--epub", "unused",
+                 "--out", str(tmp_path / "out.epub"), f"--min-token-match={value}"])
+    assert code == 1
+    assert "--min-token-match" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("kind", ["hardlink", "symlink"])
+def test_output_alias_cannot_overwrite_ebook(tmp_path, capsys, kind):
+    epub = build_epub(str(tmp_path / "book.epub"))
+    original = (tmp_path / "book.epub").read_bytes()
+    out = tmp_path / "alias.epub"
+    try:
+        if kind == "hardlink":
+            os.link(epub, out)
+        else:
+            out.symlink_to(epub)
+    except OSError:
+        pytest.skip(f"{kind} unavailable on this filesystem")
+    code = main(["build", "--audio", "unused", "--epub", epub, "--out", str(out)])
+    assert code == 1
+    assert "overwrite your ebook" in capsys.readouterr().err
+    assert (tmp_path / "book.epub").read_bytes() == original
+
+
+@pytest.mark.skipif(not has_ffmpeg, reason="ffmpeg is needed")
+@pytest.mark.parametrize("threshold,expected", [("0", 0), ("0.5", 0), ("1", 5)])
+@pytest.mark.parametrize("custom_report", [False, True])
+def test_build_token_match_gate_keeps_inspectable_outputs(
+    tmp_path, monkeypatch, capsys, threshold, expected, custom_report,
+):
+    from conftest import speak
+    from readalign.epub import load_epub
+    from test_output import silent_mp3
+
+    epub = build_epub(str(tmp_path / "book.epub"))
+    package = load_epub(epub)
+    words = speak([sentence for doc in package.docs for sentence in doc.sentences])
+    # Omit one interior word, leaving enough anchors for a low-drift alignment.
+    del words[len(words) // 2]
+    audio = silent_mp3(tmp_path / "narration.mp3", words[-1].end + 2)
+    monkeypatch.setattr(
+        "readalign.asr.transcribe_tracks",
+        lambda *a, **k: (words, {"cached_tracks": 0, "seconds": 0, "device": "test"}),
+    )
+    out = tmp_path / "out.epub"
+    report_path = (tmp_path / "reports" / "voyage.json" if custom_report
+                   else tmp_path / "readalign-report.json")
+    code = main(["build", "--audio", audio, "--epub", epub, "--out", str(out),
+                 "--min-token-match", threshold,
+                 *(["--report", str(report_path)] if custom_report else [])])
+    assert code == expected
+    output = capsys.readouterr()
+    if expected == 5:
+        assert "--min-token-match" in output.err
+        assert str(report_path) in output.err
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["token_match_gate"] == {
+        "threshold": float(threshold), "passed": expected == 0,
+    }
+    assert 0.5 < report["coverage"]["token_match_rate"] < 1
+    assert out.is_file()
+    assert (tmp_path / "out-sidecars" / "align.json").is_file()
+    assert main(["check", str(out)]) == 0
+
+
+@pytest.mark.parametrize("target", ["book.epub", "out.epub", "out-sidecars/align.json"])
+def test_report_cannot_overwrite_ebook_or_sidecars(tmp_path, capsys, target):
+    epub = build_epub(str(tmp_path / "book.epub"))
+    code = main(["build", "--audio", "unused", "--epub", epub,
+                 "--out", str(tmp_path / "out.epub"), "--report", str(tmp_path / target)])
+    assert code == 1
+    assert "--report" in capsys.readouterr().err
+
+
+def test_zero_beam_size_is_rejected_before_loading_inputs(tmp_path, capsys):
+    code = main(["build", "--audio", "unused", "--epub", "unused", "--beam-size", "0",
+                 "--out", str(tmp_path / "out.epub")])
+    assert code == 1
+    assert "--beam-size" in capsys.readouterr().err
+
+
+def test_missing_validator_is_rejected_before_transcription(tmp_path, capsys):
+    code = main(["build", "--audio", "unused", "--epub", "unused",
+                 "--out", str(tmp_path / "out.epub"), "--verify", str(tmp_path / "missing.jar")])
+    assert code == 1
+    assert "--verify" in capsys.readouterr().err
+
+
+def test_corrupt_zip_member_is_a_readable_check_error(tmp_path, capsys):
+    path = tmp_path / "corrupt.epub"
+    build_epub(str(path))
+    with zipfile.ZipFile(path) as archive:
+        info = archive.getinfo("META-INF/container.xml")
+        offset = info.header_offset + 30 + len(info.filename.encode()) + len(info.extra)
+    data = bytearray(path.read_bytes())
+    data[offset] ^= 0xFF
+    path.write_bytes(data)
+    assert main(["check", str(path), "--no-audio-probe"]) == 1
+    assert "not a readable EPUB" in capsys.readouterr().err

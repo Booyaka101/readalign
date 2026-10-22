@@ -177,13 +177,23 @@ Drift is how far a sentence's start could be wrong, in seconds.
 `--drift-threshold` (default 2.5s) is a gate on the maximum, not the average. The EPUB is always
 written; exceeding the threshold only changes the exit code to 3 so a script can catch it.
 
+For batch builds, `--min-token-match 0.9` also requires at least 90% of the ebook's normalised
+tokens to match the narration. This optional gate defaults to 0 (disabled). A failed gate exits 5
+but keeps the EPUB, report and enabled sidecars for inspection. The report's `token_match_gate`
+records the threshold and verdict using the unrounded match fraction. Unnarrated front matter
+and abridgements lower this score, so choose a threshold appropriate to your books. This is a
+screening aid, not proof that every sentence is correctly timed. Drift and epubcheck failures
+take precedence over this gate when more than one check fails.
+
 ## How it works
 
 1. **ffprobe** reads every audio file. FLAC, WAV, ALAC and WMA are transcoded to AAC because
    EPUB 3 only takes MP3, MP4 audio and Opus; MP3, M4A/M4B and Opus are stream-copied, so no
    audio is re-encoded unless it has to be.
 2. **faster-whisper** transcribes with word timestamps. Transcripts are cached per file, keyed by
-   content and settings, so a second run over the same audiobook costs nothing.
+   a streamed SHA-256 of the prepared audio, chapter boundaries and recogniser settings.
+   A second run avoids transcription, but still prepares and hashes the audio. Older cache keys
+   are invalidated once; malformed entries are ignored and rebuilt.
 3. Both sides are normalised to comparable tokens: case folded, accents stripped, punctuation
    dropped, digits and roman numerals spelled out ("Chapter XVIII" and "chapter eighteen" become
    the same tokens).
@@ -207,9 +217,11 @@ written; exceeding the threshold only changes the exit code to 3 so a script can
 --audio PATH             a file, a directory of numbered files, or a glob
 --epub PATH              the matching DRM-free EPUB
 --out PATH               the EPUB to write
+--report PATH            JSON report path (default: readalign-report.json beside --out)
 --model NAME             faster-whisper model (default: large-v3-turbo)
 --language CODE          ISO code of the narration (default: detect)
 --drift-threshold SECS   exit 3 if any sentence drifts more than this (default: 2.5)
+--min-token-match N      exit 5 if matched book-token fraction is below N (0 to 1; default: 0)
 --sidecars/--no-sidecars write WebVTT and align.json next to the output (default: on)
 --dry-run                probe the inputs and print the plan, transcribe nothing
 --narrator NAME          value for the media:narrator metadata
@@ -278,6 +290,7 @@ against the reference Media Overlays title from the EPUB test suite at
 | 2 | the input is DRM-protected |
 | 3 | the EPUB was written but max drift exceeded `--drift-threshold` |
 | 4 | the EPUB was written but epubcheck reported problems (only with `--verify`) |
+| 5 | the EPUB was written but token match was below `--min-token-match` |
 | 130 | interrupted |
 
 Failures print one line, not a traceback.

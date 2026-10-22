@@ -1,12 +1,45 @@
 """Sidecars and the report: the parts a user reads to decide whether to trust the build."""
 
 import json
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
 
 from conftest import build_epub, make_tracks, speak
 from readalign.align import align
 from readalign.epub import load_epub
 from readalign.report import build_report, document_stats, format_summary
 from readalign.sidecar import build_align_json, build_vtt, vtt_timestamp, write_sidecars
+
+
+@pytest.mark.parametrize("hrefs", [
+    {0: "part1/chapter.xhtml", 1: "part2/chapter.xhtml"},
+    {0: "part1/Chapter.xhtml", 1: "part2/chapter.xhtml"},
+])
+def test_same_basename_chapters_keep_both_vtt_files(tmp_path, hrefs):
+    _, result, tracks = prepared(tmp_path)
+    paths = write_sidecars(str(tmp_path / "sidecars"), result, tracks, hrefs, {})
+    vtts = [Path(path) for path in paths if path.endswith(".vtt")]
+    assert len(vtts) == 2
+    assert len({path.name.casefold() for path in vtts}) == 2
+    for doc_index, path in enumerate(vtts):
+        content = path.read_text(encoding="utf-8")
+        expected = [entry for entry in result.timed if entry.sentence.doc_index == doc_index]
+        assert expected
+        assert all(entry.sentence.fragment_id in content for entry in expected)
+
+
+def test_collision_suffix_does_not_overwrite_an_existing_chapter_name(tmp_path):
+    _, result, tracks = prepared(tmp_path)
+    entry = result.timed[0]
+    result.timed.append(replace(entry, sentence=replace(entry.sentence, doc_index=2)))
+    hrefs = {0: "a/chapter.xhtml", 1: "b/chapter.xhtml", 2: "chapter.doc000.xhtml"}
+    paths = write_sidecars(str(tmp_path / "sidecars"), result, tracks, hrefs, {})
+    names = [Path(path).name.casefold() for path in paths if path.endswith(".vtt")]
+    assert len(names) == len(set(names)) == 3
+    assert "chapter.doc000.vtt" in names
+    assert all(Path(path).is_file() for path in paths)
 
 
 def prepared(tmp_path):

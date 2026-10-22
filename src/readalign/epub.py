@@ -9,7 +9,9 @@ from __future__ import annotations
 import posixpath
 import re
 import zipfile
+import zlib
 from dataclasses import dataclass, field
+from urllib.parse import unquote
 
 from lxml import etree
 
@@ -147,7 +149,8 @@ class EpubPackage:
 
     def resolve(self, href: str) -> str:
         """Turn an href relative to the package document into a path inside the archive."""
-        joined = posixpath.join(self.opf_dir, href) if self.opf_dir else href
+        target = unquote(href.split("#", 1)[0])
+        joined = posixpath.join(self.opf_dir, target) if self.opf_dir else target
         return posixpath.normpath(joined)
 
     def title(self) -> str | None:
@@ -235,7 +238,7 @@ def load_epub(path: str) -> EpubPackage:
     with open_archive(path) as archive:
         try:
             return _load_open(path, archive)
-        except zipfile.BadZipFile as exc:
+        except (zipfile.BadZipFile, zlib.error, NotImplementedError, RuntimeError) as exc:
             # A corrupt member survives the central directory and only fails on read.
             raise InputError(f"{path} is not a readable EPUB: {exc}") from None
 

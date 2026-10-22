@@ -6,6 +6,7 @@ value everywhere and reads back every form it may meet in a third-party package.
 
 from __future__ import annotations
 
+import math
 import re
 
 _FULL = re.compile(r"^(\d+):([0-5]\d):([0-5]\d(?:\.\d+)?)$")
@@ -31,12 +32,17 @@ def parse_clock(value: str) -> float:
     """Parse any SMIL clock value into seconds."""
     text = value.strip()
     match = _FULL.match(text)
-    if match:
-        return int(match[1]) * 3600 + int(match[2]) * 60 + float(match[3])
-    match = _PARTIAL.match(text)
-    if match:
-        return int(match[1]) * 60 + float(match[2])
-    match = _TIMECOUNT.match(text)
-    if match:
-        return float(match[1]) * _UNIT_SECONDS[match[2]]
-    raise ValueError(f"not a SMIL clock value: {value!r}")
+    try:
+        if match:
+            seconds = int(match[1]) * 3600 + int(match[2]) * 60 + float(match[3])
+        elif match := _PARTIAL.match(text):
+            seconds = int(match[1]) * 60 + float(match[2])
+        elif match := _TIMECOUNT.match(text):
+            seconds = float(match[1]) * _UNIT_SECONDS[match[2]]
+        else:
+            raise ValueError
+        if math.isfinite(seconds):
+            return seconds
+    except (ValueError, OverflowError):
+        pass
+    raise ValueError(f"not a finite SMIL clock value: {value!r}")
