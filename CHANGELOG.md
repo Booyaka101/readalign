@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 - 2026-10-22
 
 - New: `--report PATH` selects a separate JSON report for each batch build, with guards
   against overwriting input audio, the input/output EPUB or generated sidecars.

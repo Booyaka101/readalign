@@ -12,7 +12,7 @@ PyPI on 2026-09-18 from the v1.0.0 release artefacts.
 
 Last updated 2026-10-04.
 
-## October 22 review and enhancement (unreleased)
+## October 22 review and enhancement (1.2.0)
 
 - Reviewed CLI input checks, archive/XML handling, audio preparation, transcription/cache,
   alignment, optional refinement, EPUB packaging, validation and subtitle exports.
@@ -30,7 +30,7 @@ Last updated 2026-10-04.
   The custom report path and 0.9 token-match gate both succeeded.
 - No new long-book/GPU transcription or real-reader playback test, and no optional MMS model
   execution. Those remain limits of this review, not claimed verification.
-- Work remains on PR #1; no version bump, merge or release.
+- Prepared version 1.2.0 through PR #1. Publication follows CI on the exact release commit.
 
 ## Verified working
 
