@@ -13,7 +13,7 @@ from conftest import CHAPTERS, STRUCTURED, build_epub, make_tracks, speak
 from readalign.align import align
 from readalign.cli import check_epub
 from readalign.epub import OPF_NS, load_epub, local_name
-from readalign.members import SourceFile
+from readalign.members import ArchiveMember, SourceFile
 from readalign.package import ACTIVE_CLASS, build_output, ensure_mimetype, write_epub
 from readalign.smil import EPUB_NS, SMIL_NS
 
@@ -209,6 +209,78 @@ def test_check_accepts_what_build_wrote(aligned, tmp_path):
     assert findings["errors"] == []
     assert findings["ok"]
     assert findings["sentences"] == len(result.timed)
+
+
+@pytest.mark.parametrize("from_archive", [False, True])
+def test_streamed_audio_selects_zip64_before_writing(tmp_path, monkeypatch, from_archive):
+    """Lower the threshold to exercise multi-gigabyte audio without a huge fixture."""
+    payload = b"a" * 4096
+    if from_archive:
+        original = tmp_path / "original.epub"
+        with zipfile.ZipFile(original, "w") as archive:
+            archive.writestr("audio.mp3", payload)
+        member = ArchiveMember(str(original), "audio.mp3")
+    else:
+        original = tmp_path / "audio.mp3"
+        original.write_bytes(payload)
+        member = SourceFile(str(original))
+    monkeypatch.setattr(zipfile, "ZIP64_LIMIT", 1024)
+    out = tmp_path / "large.epub"
+    small = tmp_path / "small.mp3"
+    small.write_bytes(b"small")
+    files = {"audio.mp3": member, "small.mp3": SourceFile(str(small))}
+    ensure_mimetype(files)
+    write_epub(str(out), files, ["small.mp3"])
+    with zipfile.ZipFile(out) as archive:
+        assert archive.read("audio.mp3") == payload
+        assert archive.getinfo("audio.mp3").extract_version == 45
+        assert archive.getinfo("small.mp3").extract_version == 20
+
+
+@pytest.mark.parametrize("shared_track", [True, False])
+def test_long_book_uses_file_local_clocks_and_stored_audio(tmp_path, shared_track):
+    from readalign.align import TimedSentence
+    from readalign.clock import parse_clock
+    from readalign.sidecar import build_vtt
+
+    chapters = [(f"Chapter {index}", "".join(
+        f"<p>Voyage sentence {n} describes the sea.</p>" for n in range(450)
+    )) for index in range(2)]
+    package = load_epub(build_epub(str(tmp_path / "long.epub"), chapters=chapters))
+    tracks = make_tracks([16 * 3600] if shared_track else [8 * 3600, 8 * 3600])
+    # These bytes exercise packaging only, not audio decoding or reader playback.
+    for track in tracks:
+        path = tmp_path / f"track{track.index}.mp3"
+        path.write_bytes(b"synthetic audio")
+        track.path = str(path)
+    by_doc = {}
+    for index, doc in enumerate(package.docs):
+        start = index * 8 * 3600 + 15.125
+        by_doc[doc.manifest_id] = [
+            TimedSentence(sentence, start + n * 2, start + n * 2 + 1.5,
+                          confidence=1.0, track_index=1 if shared_track else index + 1)
+            for n, sentence in enumerate(doc.sentences)
+        ]
+    files, summary = build_output(package, by_doc, tracks)
+    assert summary["audio_files"] == len(tracks)
+    out = str(tmp_path / "out.epub")
+    ensure_mimetype(files)
+    write_epub(out, files, package.order)
+    assert check_epub(out, probe_audio=False)["ok"]
+    with zipfile.ZipFile(out) as archive:
+        for index, doc in enumerate(package.docs):
+            root = etree.fromstring(archive.read(f"EPUB/media-overlays/chapter{index + 1}.smil"))
+            clips = list(root.iter(f"{{{SMIL_NS}}}audio"))
+            expected_start = index * 8 * 3600 + 15.125 if shared_track else 15.125
+            assert parse_clock(clips[0].get("clipBegin")) == expected_start
+            assert len(clips) == len(doc.sentences) == 450
+            track = tracks[0 if shared_track else index]
+            vtt = build_vtt(by_doc[doc.manifest_id], track, track.href)
+            assert ("08:00:15.125" if shared_track and index else "00:00:15.125") in vtt
+        for info in archive.infolist():
+            if info.filename.endswith(".mp3"):
+                assert info.compress_type == zipfile.ZIP_STORED
+                assert archive.read(info) == b"synthetic audio"
 
 
 def _clip_past_the_end(root):

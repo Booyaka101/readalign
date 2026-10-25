@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.3.0 - 2026-10-25
+
+- Fixed: work-directory audio/WAV paths cannot overwrite the input ebook, output EPUB or
+  report. Inputs must stay outside the generated sidecar directory when sidecars are enabled.
+- Fixed: chapter-derived subtitle names cannot escape the sidecar directory through Windows
+  separators or use reserved device names. Sanitized names still receive collision handling.
+- Added a real surround-AAC to stereo-MP3 regression checking retained chapter marks and
+  unchanged source bytes.
+- New: `--audio-format mp3` stream-copies existing MP3 sources and transcodes other codecs
+  to MP3 for readers with AAC/Opus decoder limitations. The default `auto` retains the existing
+  behavior. Timing uses the prepared audio and the report records the selected format.
+- Fixed: streamed audiobook entries now declare their size before ZIP writing so large files
+  select ZIP64 headers instead of failing at the end of the write. Small entries retain their
+  existing archive format.
+- Added long-book packaging regressions and evidence-linked reader guidance distinguishing
+  codec support, large-track loading, sentence highlighting and narration-position restoration.
+
 ## 1.2.0 - 2026-10-22
 
 - New: `--report PATH` selects a separate JSON report for each batch build, with guards

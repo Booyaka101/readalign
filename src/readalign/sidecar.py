@@ -11,6 +11,7 @@ import contextlib
 import json
 import os
 import posixpath
+import re
 from collections import defaultdict
 
 from .align import AlignmentResult, TimedSentence
@@ -101,6 +102,18 @@ def _clear_previous(directory: str) -> None:
                 os.unlink(os.path.join(directory, name))
 
 
+def _sidecar_stem(href: str) -> str:
+    # EPUB paths are untrusted and can contain OS separators or Windows device names.
+    stem = posixpath.splitext(posixpath.basename(href.replace("\\", "/")))[0]
+    stem = re.sub(r'[<>:"|?*\x00-\x1f]', "_", stem).rstrip(" .") or "chapter"
+    device = stem.split(".", 1)[0].upper()
+    if device in {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"} or re.fullmatch(
+        r"(?:COM|LPT)[1-9¹²³]", device
+    ):
+        stem = "_" + stem
+    return stem
+
+
 def write_sidecars(
     directory: str,
     result: AlignmentResult,
@@ -128,7 +141,7 @@ def write_sidecars(
     names = {}
     for doc_index, track_index in sorted(grouped):
         href = doc_hrefs.get(doc_index, f"doc{doc_index}")
-        stem = posixpath.splitext(posixpath.basename(href))[0]
+        stem = _sidecar_stem(href)
         names[(doc_index, track_index)] = (
             f"{stem}.part{track_index:03d}.vtt" if doc_index in multi_track else f"{stem}.vtt"
         )

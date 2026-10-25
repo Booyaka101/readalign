@@ -21,7 +21,7 @@ from urllib.parse import unquote
 
 from . import __version__
 from .errors import InputError, ReadAlignError
-from .fs import ensure_directory, same_path
+from .fs import ensure_directory, is_within, same_path
 from .members import open_archive
 
 DEFAULT_MODEL = "large-v3-turbo"
@@ -79,6 +79,9 @@ def build_parser() -> argparse.ArgumentParser:
                        help="disable the voice-activity filter")
     build.add_argument("--audio-bitrate", default="96k",
                        help="bitrate used when audio has to be transcoded (default: 96k)")
+    build.add_argument("--audio-format", choices=["auto", "mp3"], default="auto",
+                       help="embedded audio format: auto preserves supported codecs; mp3 avoids "
+                            "AAC/Opus decoder limitations (default: auto)")
     build.add_argument("--verify", nargs="?", const="auto", default=None, metavar="EPUBCHECK",
                        help="validate the result with epubcheck after writing it (needs Java). "
                             "Pass its jar path, or leave the value off to search PATH, "
@@ -162,11 +165,8 @@ def run_build(args) -> int:
         raise InputError("--report would overwrite the input or output EPUB")
     directory = os.path.join(os.path.dirname(out_path),
                              os.path.splitext(os.path.basename(out_path))[0] + "-sidecars")
-    if args.sidecars:
-        sidecar_root = os.path.normcase(os.path.realpath(directory))
-        report_real = os.path.normcase(os.path.realpath(report_path))
-        if report_real == sidecar_root or report_real.startswith(sidecar_root + os.sep):
-            raise InputError("--report must be outside the generated sidecar directory")
+    if args.sidecars and is_within(report_path, directory):
+        raise InputError("--report must be outside the generated sidecar directory")
 
     verification_tool = None
     if args.verify and not args.dry_run:
@@ -190,16 +190,28 @@ def run_build(args) -> int:
     for source in sources:
         if same_path(out_path, source) or same_path(report_path, source):
             raise InputError(f"an output path would overwrite source audio: {source}")
+    if args.sidecars:
+        for path in [args.epub, out_path, *sources]:
+            if is_within(path, directory):
+                raise InputError(f"inputs and output EPUB must be outside the generated "
+                                 f"sidecar directory: {path}")
     log(f"preparing {len(sources)} audio file(s)")
     work_dir = args.work_dir or tempfile.mkdtemp(prefix="readalign-")
     temporary = args.work_dir is None
     ensure_directory(work_dir, "work directory")
     try:
         for index in range(1, len(sources) + 1):
-            wav_path = os.path.join(work_dir, "wav", f"part{index:03d}.wav")
-            if any(same_path(wav_path, source) for source in [args.epub, *sources]):
-                raise InputError(f"the work directory would overwrite an input: {wav_path}")
-        tracks = prepare_tracks(sources, work_dir, args.audio_bitrate, log=log)
+            # Reserve all prepared formats before ffmpeg can modify any existing output.
+            scratch_paths = [os.path.join(work_dir, "audio", f"part{index:03d}{suffix}")
+                             for suffix in (".mp3", ".m4a", ".opus")]
+            scratch_paths.append(os.path.join(work_dir, "wav", f"part{index:03d}.wav"))
+            for path in scratch_paths:
+                if any(same_path(path, protected)
+                       for protected in [args.epub, out_path, report_path, *sources]):
+                    raise InputError(f"the work directory would overwrite an input or output: "
+                                     f"{path}")
+        tracks = prepare_tracks(sources, work_dir, args.audio_bitrate, log=log,
+                                audio_format=args.audio_format)
         if args.dry_run:
             return _dry_run_plan(package, tracks, log)
 
@@ -279,6 +291,7 @@ def run_build(args) -> int:
             drift_threshold=args.drift_threshold,
             warnings=warnings,
             extras={"elapsed_seconds": round(time.monotonic() - started, 1),
+                    "audio_format": args.audio_format,
                     "token_match_gate": {
                         "threshold": args.min_token_match,
                         "passed": (result.matched_tokens / result.book_tokens
