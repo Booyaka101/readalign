@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.1 - 2026-10-25
 
 - Fixed: SMIL playback no longer skips audio between consecutive aligned sentences, including
   chapter boundaries and gaps spanning audio files. Gaps play with the preceding sentence's
