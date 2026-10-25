@@ -23,7 +23,7 @@ from .epub import OPF_NS, EpubPackage, ManifestItem, local_name
 from .errors import InputError
 from .fs import atomic_output, ensure_directory, unique_filenames
 from .members import Member, MemberReader, SourceFile
-from .smil import build_smil, overlay_duration, relative_href
+from .smil import build_smil, continuous_clips, overlay_duration, relative_href
 
 AUDIO_DIR = "audio"
 OVERLAY_DIR = "media-overlays"
@@ -198,6 +198,16 @@ def build_output(
     narrator: str | None = None,
 ) -> tuple[Member, dict]:
     """Produce the member-name-to-bytes map of the output EPUB, and a summary of what changed."""
+    # Normalize across the whole spine, not separately per chapter: readers also
+    # skip unreferenced audio between two different overlay documents.
+    entries = continuous_clips([
+        entry for doc in package.docs for entry in entries_by_doc.get(doc.manifest_id, [])
+    ], tracks)
+    doc_ids = {index: doc.manifest_id for index, doc in enumerate(package.docs)}
+    entries_by_doc = {}
+    for entry in entries:
+        entries_by_doc.setdefault(doc_ids[entry.sentence.doc_index], []).append(entry)
+
     manifest = _manifest_element(package)
     metadata = _metadata_element(package)
     _drop_existing_overlay_metadata(metadata)
@@ -255,7 +265,7 @@ def build_output(
         overlay_id = _free_id(package, f"readalign-smil-{doc.manifest_id}")
         _add_manifest_item(package, manifest, overlay_id, href, "application/smil+xml")
         package.manifest[doc.manifest_id].element.set("media-overlay", overlay_id)
-        duration = overlay_duration(entries)
+        duration = overlay_duration(entries, by_index)
         overlays.append((overlay_id, duration))
         total += duration
 
