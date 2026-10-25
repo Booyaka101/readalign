@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Fixed: SMIL playback no longer skips audio between consecutive aligned sentences, including
+  chapter boundaries and gaps spanning audio files. Gaps play with the preceding sentence's
+  highlight; file-local clip bounds and overlay duration metadata include the recovered audio.
+  Alignment reports and WebVTT timestamps remain unchanged. Audio outside the first-to-last
+  aligned range stays excluded to preserve excerpt behavior. Regenerate existing EPUBs to apply.
+
 ## 1.3.0 - 2026-10-25
 
 - Fixed: work-directory audio/WAV paths cannot overwrite the input ebook, output EPUB or

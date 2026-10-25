@@ -4,14 +4,17 @@ import os
 import shutil
 import subprocess
 import zipfile
+from dataclasses import replace
+from itertools import pairwise
 from urllib.parse import quote
 
 import pytest
 from lxml import etree
 
 from conftest import CHAPTERS, STRUCTURED, build_epub, make_tracks, speak
-from readalign.align import align
+from readalign.align import TimedSentence, align
 from readalign.cli import check_epub
+from readalign.clock import parse_clock
 from readalign.epub import OPF_NS, load_epub, local_name
 from readalign.members import ArchiveMember, SourceFile
 from readalign.package import ACTIVE_CLASS, build_output, ensure_mimetype, write_epub
@@ -104,6 +107,47 @@ def test_package_document_carries_the_overlay_metadata(aligned):
     assert sum(1 for meta in durations if meta[1] is None) == 1
     assert ("media:active-class", None, ACTIVE_CLASS) in metas
     assert ("media:narrator", None, "A Narrator") in metas
+
+
+@pytest.mark.parametrize("durations", [[700], [655, 2, 43]])
+@pytest.mark.parametrize("across_chapters", [True, False])
+def test_overlays_preserve_audio_between_sentences_and_chapters(
+    tmp_path, durations, across_chapters
+):
+    package = load_epub(build_epub(str(tmp_path / "gaps.epub")))
+    tracks = make_tracks(durations)
+    first = package.docs[0].sentences[0]
+    second = package.docs[int(across_chapters)].sentences[1]
+    entries = {
+        "c1": [TimedSentence(first, 652, 654, 1.0, 1)],
+    }
+    entries.setdefault("c2" if across_chapters else "c1", []).append(
+        TimedSentence(second, 658, 662, 1.0, len(tracks)))
+    original = {key: [replace(entry) for entry in values] for key, values in entries.items()}
+    files, summary = build_output(package, entries, tracks)
+    clips = []
+    for index, _doc in enumerate(package.docs, start=1):
+        path = f"EPUB/media-overlays/chapter{index}.smil"
+        if path not in files:
+            continue
+        root = etree.fromstring(files[path])
+        for audio in root.iter(f"{{{SMIL_NS}}}audio"):
+            track = next(track for track in tracks if audio.get("src").endswith(
+                f"part{track.index:03d}.mp3"))
+            begin = parse_clock(audio.get("clipBegin"))
+            end = parse_clock(audio.get("clipEnd"))
+            assert 0 <= begin < end <= track.duration
+            clips.append((track.offset + begin, track.offset + end))
+    assert clips[0][0] == 652  # Preserve the excerpt's outer boundaries.
+    assert clips[-1][1] == 662
+    assert all(left[1] == right[0] for left, right in pairwise(clips))
+    assert parse_clock(summary["total_duration"]) == 10
+    opf = etree.fromstring(files[package.opf_path])
+    durations_in_opf = [parse_clock(meta.text) for meta in opf.iter(f"{{{OPF_NS}}}meta")
+                        if meta.get("property") == "media:duration" and meta.get("refines")]
+    assert sum(durations_in_opf) == 10
+    assert summary["audio_files"] == len(tracks)
+    assert entries == original  # Sidecars and diagnostics retain the alignment evidence.
 
 
 def test_archive_starts_with_a_stored_mimetype(aligned, tmp_path):
@@ -273,7 +317,9 @@ def test_long_book_uses_file_local_clocks_and_stored_audio(tmp_path, shared_trac
             clips = list(root.iter(f"{{{SMIL_NS}}}audio"))
             expected_start = index * 8 * 3600 + 15.125 if shared_track else 15.125
             assert parse_clock(clips[0].get("clipBegin")) == expected_start
-            assert len(clips) == len(doc.sentences) == 450
+            # Crossing a file boundary adds a clip for the gap in the next file.
+            assert len(clips) == 450 + int(not shared_track and index == 0)
+            assert len(doc.sentences) == 450
             track = tracks[0 if shared_track else index]
             vtt = build_vtt(by_doc[doc.manifest_id], track, track.href)
             assert ("08:00:15.125" if shared_track and index else "00:00:15.125") in vtt

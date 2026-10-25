@@ -288,8 +288,14 @@ it, and any run that uses it records the restriction in the report's warnings.
   reported as untimed. They will never reach full coverage.
 - Audio is embedded in the EPUB, so the file is as large as the audiobook. Frankenstein at 64 kbps
   is 205 MB. There is no streaming or external-audio option in this version.
-- The audio timeline is shared across files. A sentence never spans two audio files; if one would,
-  it is clipped at the file boundary.
+- Media overlays preserve all audio between the first aligned sentence's start and the last
+  aligned sentence's end. Gaps between sentence timings play under the preceding sentence's
+  highlight, including across chapters and audio files. A gap that crosses files gets separate
+  file-local clips; even an intervening file with no matched words is included. Audio outside
+  that aligned range remains excluded, so an ebook excerpt does not play unrelated opening or
+  closing narration. Regenerate existing EPUBs to apply this fix.
+- The alignment report and WebVTT sidecars keep the original matched sentence times; only the
+  EPUB playback clips are extended. Overlay `media:duration` includes the recovered audio.
 - Sentence splitting is tuned for English-style punctuation. Other languages align fine but may
   produce longer or shorter units than a native reader would choose.
 

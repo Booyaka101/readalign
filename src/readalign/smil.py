@@ -8,6 +8,7 @@ the user skip (a footnote, a page number) or escape out of (a table, a list, a f
 from __future__ import annotations
 
 import posixpath
+from dataclasses import replace
 from urllib.parse import quote
 
 from lxml import etree
@@ -26,6 +27,28 @@ def relative_href(from_path: str, to_path: str) -> str:
     """Path from one archive member to another, as a path-relative-scheme-less-URL string."""
     relative = posixpath.relpath(to_path, posixpath.dirname(from_path))
     return quote(relative.replace("\\", "/"))
+
+
+def continuous_clips(
+    entries: list[TimedSentence], tracks: list[AudioTrack]
+) -> list[TimedSentence]:
+    """Cover inter-sentence audio without changing the alignment or excerpt boundaries."""
+    positions = {track.index: index for index, track in enumerate(tracks)}
+    clips = []
+    for index, entry in enumerate(entries):
+        end = max(entry.end, entries[index + 1].start) if index + 1 < len(entries) else entry.end
+        start = entry.start
+        position = positions[entry.track_index]
+        # A gap can span files, including a file with no matched words. Each SMIL
+        # clip must still use that file's local clock and stop at its real end.
+        while position < len(tracks) and start < end:
+            track = tracks[position]
+            stop = min(end, track.end)
+            if stop > start:
+                clips.append(replace(entry, start=start, end=stop, track_index=track.index))
+            start = stop
+            position += 1
+    return clips
 
 
 def build_smil(
