@@ -39,6 +39,64 @@ def test_unknown_audio_format_is_an_argparse_error():
     assert error.value.code == 2
 
 
+@pytest.mark.parametrize("protected", ["ebook", "output", "report"])
+@pytest.mark.parametrize("stage", ["audio", "wav"])
+def test_work_files_cannot_overwrite_protected_paths(tmp_path, monkeypatch, capsys,
+                                                   protected, stage):
+    from readalign import audio
+
+    work = tmp_path / "work"
+    target = work / stage / ("part001.mp3" if stage == "audio" else "part001.wav")
+    target.parent.mkdir(parents=True)
+    epub = build_epub(str(target if protected == "ebook" else tmp_path / "book.epub"))
+    if protected != "ebook":
+        target.write_bytes(b"previous successful output")
+    original = target.read_bytes()
+    narration = tmp_path / "narration.mp3"
+    narration.write_bytes(b"input")
+    monkeypatch.setattr(audio, "require_ffmpeg", lambda: None)
+    monkeypatch.setattr(audio, "ffprobe", lambda *_: pytest.fail("must refuse before preparing"))
+    args = ["build", "--audio", str(narration), "--epub", epub, "--out",
+            str(target if protected == "output" else tmp_path / "out.epub"),
+            "--work-dir", str(work)]
+    if protected == "report":
+        args += ["--report", str(target)]
+    assert main(args) == 1
+    assert "overwrite" in capsys.readouterr().err
+    assert target.read_bytes() == original
+
+
+@pytest.mark.parametrize("protected", ["ebook", "audio"])
+def test_sidecar_directory_cannot_contain_protected_paths(tmp_path, monkeypatch, capsys,
+                                                        protected):
+    from readalign import audio
+
+    directory = tmp_path / "out-sidecars"
+    directory.mkdir()
+    target = directory / ("chapter1.vtt" if protected != "audio" else "narration.mp3")
+    epub = build_epub(str(target if protected == "ebook" else tmp_path / "book.epub"))
+    narration = target if protected == "audio" else tmp_path / "narration.mp3"
+    narration.write_bytes(b"input")
+    original = target.read_bytes()
+    monkeypatch.setattr(audio, "require_ffmpeg", lambda: None)
+    monkeypatch.setattr(audio, "ffprobe", lambda *_: pytest.fail("must refuse before preparing"))
+    assert main(["build", "--audio", str(narration), "--epub", epub, "--out",
+                 str(tmp_path / "out.epub")]) == 1
+    assert "sidecar" in capsys.readouterr().err
+    assert target.read_bytes() == original
+
+
+@pytest.mark.skipif(not has_ffmpeg, reason="ffmpeg is needed")
+def test_no_sidecars_allows_input_in_sidecar_directory(tmp_path):
+    directory = tmp_path / "out-sidecars"
+    directory.mkdir()
+    epub = build_epub(str(directory / "book.epub"))
+    original = (directory / "book.epub").read_bytes()
+    assert main(["build", "--audio", "examples/aesop/aesop-section-37.mp3", "--epub", epub,
+                 "--out", str(tmp_path / "out.epub"), "--no-sidecars", "--dry-run"]) == 0
+    assert (directory / "book.epub").read_bytes() == original
+
+
 @pytest.mark.skipif(not has_ffmpeg, reason="ffmpeg is needed")
 def test_mp3_build_converts_aac_and_records_requested_format(tmp_path, monkeypatch):
     import subprocess

@@ -42,6 +42,31 @@ def test_collision_suffix_does_not_overwrite_an_existing_chapter_name(tmp_path):
     assert all(Path(path).is_file() for path in paths)
 
 
+@pytest.mark.parametrize("href", [
+    r"..\escaped.xhtml", r"C:\escaped.xhtml", "CON.xhtml", "NUL.part.xhtml",
+    "chapter:one.xhtml", "chapter?.xhtml", "...xhtml", "COM1.xhtml", "LPT².xhtml",
+    "CONIN$.xhtml", "control\x01.xhtml",
+])
+def test_sidecar_names_are_safe_local_leaves(tmp_path, href):
+    _, result, tracks = prepared(tmp_path)
+    directory = tmp_path / "sidecars"
+    paths = write_sidecars(str(directory), result, tracks, {0: href, 1: "chapter2.xhtml"}, {})
+    assert all(Path(path).resolve().parent == directory.resolve() for path in paths)
+    assert all(Path(path).is_file() for path in paths)
+    assert not (tmp_path / "escaped.vtt").exists()
+    names = [Path(path).name for path in paths]
+    assert all(not any(c in name for c in '<>:"|?*\\') for name in names)
+    devices = {"CON", "NUL", "COM1", "LPT²", "CONIN$"}
+    assert all(name.split(".", 1)[0].upper() not in devices for name in names)
+
+
+def test_sanitized_chapter_names_remain_unique(tmp_path):
+    _, result, tracks = prepared(tmp_path)
+    paths = write_sidecars(str(tmp_path / "sidecars"), result, tracks,
+                           {0: "chapter?.xhtml", 1: "chapter*.xhtml"}, {})
+    assert len(paths) == len({Path(path).name.casefold() for path in paths}) == 3
+
+
 def prepared(tmp_path):
     package = load_epub(build_epub(str(tmp_path / "in.epub")))
     sentences = [sentence for doc in package.docs for sentence in doc.sentences]

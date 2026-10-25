@@ -24,6 +24,16 @@ def same_path(first: str, second: str) -> bool:
                 and os.path.samefile(first, second)))
 
 
+def is_within(path: str, directory: str) -> bool:
+    """Include the directory itself and resolve aliases before comparing path components."""
+    path = os.path.normcase(os.path.realpath(path))
+    directory = os.path.normcase(os.path.realpath(directory))
+    try:
+        return os.path.commonpath([path, directory]) == directory
+    except ValueError:  # Windows paths can be on different drives.
+        return False
+
+
 def write_text(path: str, text: str) -> None:
     try:
         with atomic_output(path) as temporary, \

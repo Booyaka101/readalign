@@ -21,7 +21,7 @@ from urllib.parse import unquote
 
 from . import __version__
 from .errors import InputError, ReadAlignError
-from .fs import ensure_directory, same_path
+from .fs import ensure_directory, is_within, same_path
 from .members import open_archive
 
 DEFAULT_MODEL = "large-v3-turbo"
@@ -165,11 +165,8 @@ def run_build(args) -> int:
         raise InputError("--report would overwrite the input or output EPUB")
     directory = os.path.join(os.path.dirname(out_path),
                              os.path.splitext(os.path.basename(out_path))[0] + "-sidecars")
-    if args.sidecars:
-        sidecar_root = os.path.normcase(os.path.realpath(directory))
-        report_real = os.path.normcase(os.path.realpath(report_path))
-        if report_real == sidecar_root or report_real.startswith(sidecar_root + os.sep):
-            raise InputError("--report must be outside the generated sidecar directory")
+    if args.sidecars and is_within(report_path, directory):
+        raise InputError("--report must be outside the generated sidecar directory")
 
     verification_tool = None
     if args.verify and not args.dry_run:
@@ -193,15 +190,26 @@ def run_build(args) -> int:
     for source in sources:
         if same_path(out_path, source) or same_path(report_path, source):
             raise InputError(f"an output path would overwrite source audio: {source}")
+    if args.sidecars:
+        for path in [args.epub, out_path, *sources]:
+            if is_within(path, directory):
+                raise InputError(f"inputs and output EPUB must be outside the generated "
+                                 f"sidecar directory: {path}")
     log(f"preparing {len(sources)} audio file(s)")
     work_dir = args.work_dir or tempfile.mkdtemp(prefix="readalign-")
     temporary = args.work_dir is None
     ensure_directory(work_dir, "work directory")
     try:
         for index in range(1, len(sources) + 1):
-            wav_path = os.path.join(work_dir, "wav", f"part{index:03d}.wav")
-            if any(same_path(wav_path, source) for source in [args.epub, *sources]):
-                raise InputError(f"the work directory would overwrite an input: {wav_path}")
+            # Reserve all prepared formats before ffmpeg can modify any existing output.
+            scratch_paths = [os.path.join(work_dir, "audio", f"part{index:03d}{suffix}")
+                             for suffix in (".mp3", ".m4a", ".opus")]
+            scratch_paths.append(os.path.join(work_dir, "wav", f"part{index:03d}.wav"))
+            for path in scratch_paths:
+                if any(same_path(path, protected)
+                       for protected in [args.epub, out_path, report_path, *sources]):
+                    raise InputError(f"the work directory would overwrite an input or output: "
+                                     f"{path}")
         tracks = prepare_tracks(sources, work_dir, args.audio_bitrate, log=log,
                                 audio_format=args.audio_format)
         if args.dry_run:

@@ -4,6 +4,30 @@
 
 ## October 25 long-book compatibility
 
+### Follow-up review, fix and enhancement loop
+
+- Reviewed audio preparation and chapter metadata, ZIP streaming and ZIP64 behavior,
+  CLI output guards, sidecar filenames, transcript cache identity/validation, clock generation,
+  overlay checking, tests and evidence claims. Kept this pass on PR #2 without a release.
+- Found scratch audio paths could alias an ebook or existing output/report, and WAV guards did
+  not protect outputs/reports. Reserve all generated codec paths before preparation and check
+  file aliases. Keep inputs outside the sidecar directory when enabled so rerun cleanup cannot
+  remove an input. `--no-sidecars` still allows inputs there.
+- Found chapter hrefs could create VTT filenames with Windows traversal, invalid characters or
+  reserved device names. Sanitize before disambiguating leaf names. Original hrefs stay in the
+  alignment JSON. Regressions cover traversal, device names and post-sanitization collisions.
+- Disproved a suspected multichannel MP3 conversion problem: ffmpeg already downmixes to
+  stereo. Added a real 5.1 AAC -> MP3 regression verifying chapter marks and source preservation,
+  without changing working conversion code.
+- Local suite with the reference overlay EPUB: 199 passed, 1 skipped (Windows symlink
+  privilege). Ruff and diff whitespace checks pass. Reader playback and narration resume
+  remain unverified; do not claim these packaging/safety fixes resolve the reader reports.
+- Rebuilt the public-domain AAC -> MP3 sample using its validated cached transcript: 18/18
+  sentences, 95.1% token match, zero max drift, zero validator errors/warnings. The EPUB is
+  SHA256-identical to the initial compatibility sample. Wheel/sdist builds and twine checks pass.
+
+### Initial compatibility pass
+
 - Investigated Readest #6989 and merged fixes #7004/#7010/#7019, plus Episteme #579.
   Evidence points to reader large-track loading, Linux AAC decoding and Android saved narration
   position; it does not establish a readalign timing defect. No copyrighted reporter book fetched.

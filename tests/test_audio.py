@@ -119,3 +119,27 @@ def test_mp3_mode_prepares_real_audio_without_changing_source(tmp_path, source_c
     assert 1.9 < track.duration < 2.2
     assert ffprobe(track.path)["streams"][0]["codec_name"] == "mp3"
     assert source.read_bytes() == original
+
+
+@pytest.mark.skipif(not (shutil.which("ffmpeg") and shutil.which("ffprobe")),
+                    reason="ffmpeg and ffprobe are needed")
+def test_mp3_conversion_downmixes_surround_and_retains_chapters(tmp_path):
+    source = tmp_path / "surround.m4a"
+    metadata = tmp_path / "chapters.txt"
+    metadata.write_text(";FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=1000\n"
+                        "title=First\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=1000\nEND=2000\n"
+                        "title=Second\n", encoding="utf-8")
+    subprocess.run([
+        "ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i",
+        "anullsrc=r=48000:cl=5.1", "-i", str(metadata), "-map_metadata", "1",
+        "-t", "2", "-c:a", "aac", str(source),
+    ], check=True)
+    original = source.read_bytes()
+    track, = prepare_tracks([str(source)], str(tmp_path / "work"), "96k",
+                            log=lambda *_: None, audio_format="mp3")
+    probe = ffprobe(track.path)
+    assert probe["streams"][0]["codec_name"] == "mp3"
+    assert probe["streams"][0]["channels"] == 2
+    assert [chapter.title for chapter in track.chapters] == ["First", "Second"]
+    assert track.chapters[1].start == pytest.approx(1, abs=0.05)
+    assert source.read_bytes() == original

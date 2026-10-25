@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fixed: work-directory audio/WAV paths cannot overwrite the input ebook, output EPUB or
+  report. Inputs must stay outside the generated sidecar directory when sidecars are enabled.
+- Fixed: chapter-derived subtitle names cannot escape the sidecar directory through Windows
+  separators or use reserved device names. Sanitized names still receive collision handling.
+- Added a real surround-AAC to stereo-MP3 regression checking retained chapter marks and
+  unchanged source bytes.
 - New: `--audio-format mp3` stream-copies existing MP3 sources and transcodes other codecs
   to MP3 for readers with AAC/Opus decoder limitations. The default `auto` retains the existing
   behavior. Timing uses the prepared audio and the report records the selected format.

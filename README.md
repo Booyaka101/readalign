@@ -246,6 +246,8 @@ works from a continuous timeline and does not assume one file per chapter.
 
 For a reader that cannot decode AAC or Opus, select MP3 output:
 
+**Unreleased:** `--audio-format` is not available in the published 1.2.0 package yet.
+
 ```
 readalign build --audio book.m4b --epub book.epub --out read-along.epub --audio-format mp3
 ```
@@ -257,6 +259,13 @@ original AAC/Opus track. Changing the prepared audio also changes the transcript
 so the first build in this mode may need to transcribe again. The report records the requested
 `audio_format` and which source files were transcoded. This option does not fix reader resume
 bugs or split a long track into chapters.
+
+Use a dedicated `--work-dir`: its `audio/partNNN.mp3`, `.m4a`, `.opus` and
+`wav/partNNN.wav` paths are reserved for generated files. Builds refuse aliases of the input
+ebook, source audio, output EPUB or report at those paths before preparing audio. The generated
+`<output-name>-sidecars/` directory must also be separate from your inputs and report; previous
+`align.json` and `.vtt` files there are replaced on a rerun. Chapter-derived VTT filenames are
+sanitized for safe local paths, while `align.json` retains the original document hrefs.
 
 ### The optional refine pass
 

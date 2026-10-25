@@ -3,9 +3,17 @@
 import pytest
 
 from readalign.errors import InputError
-from readalign.fs import unique_filenames, write_text
+from readalign.fs import is_within, unique_filenames, write_text
 from readalign.members import SourceFile
 from readalign.package import write_epub
+
+
+def test_directory_containment_compares_components(tmp_path):
+    root = tmp_path / "sidecars"
+    assert is_within(str(root / "chapter.vtt"), str(root))
+    assert is_within(str(root), str(root))
+    assert not is_within(str(tmp_path / "sidecars-other" / "chapter.vtt"), str(root))
+    assert not is_within(str(root / ".." / "book.epub"), str(root))
 
 
 @pytest.mark.parametrize("exists", [False, True])
