@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.2 - 2026-10-25
+
+- Maintenance: Linux CI installs ffmpeg without optional recommended packages. Package
+  downloads, dependency installation and CI jobs now have bounded timeouts so a slow
+  package mirror cannot leave release verification waiting indefinitely.
+- No application behavior changes from 1.3.1.
+
 ## 1.3.1 - 2026-10-25
 
 - Fixed: SMIL playback no longer skips audio between consecutive aligned sentences, including
