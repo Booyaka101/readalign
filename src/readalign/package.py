@@ -265,7 +265,7 @@ def build_output(
         overlay_id = _free_id(package, f"readalign-smil-{doc.manifest_id}")
         _add_manifest_item(package, manifest, overlay_id, href, "application/smil+xml")
         package.manifest[doc.manifest_id].element.set("media-overlay", overlay_id)
-        duration = overlay_duration(entries)
+        duration = overlay_duration(entries, by_index)
         overlays.append((overlay_id, duration))
         total += duration
 

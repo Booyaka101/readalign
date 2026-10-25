@@ -150,6 +150,51 @@ def test_overlays_preserve_audio_between_sentences_and_chapters(
     assert entries == original  # Sidecars and diagnostics retain the alignment evidence.
 
 
+@pytest.mark.parametrize("across_chapters", [True, False])
+@pytest.mark.parametrize("delta, warning", [(0.125, "unreferenced"), (-0.125, "replayed")])
+def test_check_warns_about_audio_discontinuities(
+    aligned, tmp_path, across_chapters, delta, warning
+):
+    package, _, tracks, entries = aligned
+    files, _ = build_output(package, entries, tracks)
+    path = f"EPUB/media-overlays/chapter{2 if across_chapters else 1}.smil"
+    root = etree.fromstring(files[path])
+    audio = list(root.iter(f"{{{SMIL_NS}}}audio"))[0 if across_chapters else 1]
+    from readalign.clock import format_clock
+
+    audio.set("clipBegin", format_clock(parse_clock(audio.get("clipBegin")) + delta))
+    files[path] = etree.tostring(root)
+    ensure_mimetype(files)
+    output = str(tmp_path / "discontinuous.epub")
+    # Structural checks only: the fixture may use nonexistent audio paths without ffmpeg.
+    for name, data in list(files.items()):
+        if isinstance(data, SourceFile) and not os.path.exists(data.path):
+            files[name] = b"synthetic audio"
+    write_epub(output, files, package.order)
+    findings = check_epub(output, probe_audio=False)
+    assert findings["ok"]  # Third-party overlays may intentionally omit or repeat audio.
+    assert any(warning in item and "0.125s" in item for item in findings["warnings"])
+
+
+def test_check_counts_split_playback_clips_separately_from_text_targets(tmp_path):
+    package = load_epub(build_epub(str(tmp_path / "input.epub")))
+    tracks = make_tracks([10, 10])
+    for track in tracks:
+        path = tmp_path / f"part{track.index}.mp3"
+        path.write_bytes(b"synthetic audio")
+        track.path = str(path)
+    entries = {"c1": [TimedSentence(package.docs[0].sentences[0], 2, 4, 1.0, 1)],
+               "c2": [TimedSentence(package.docs[1].sentences[0], 12, 14, 1.0, 2)]}
+    files, _ = build_output(package, entries, tracks)
+    ensure_mimetype(files)
+    output = str(tmp_path / "split.epub")
+    write_epub(output, files, package.order)
+    findings = check_epub(output, probe_audio=False)
+    assert findings["sentences"] == 2
+    assert findings["clips"] == 3
+    assert findings["warnings"] == []
+
+
 def test_archive_starts_with_a_stored_mimetype(aligned, tmp_path):
     package, _, tracks, entries = aligned
     if not has_ffmpeg:

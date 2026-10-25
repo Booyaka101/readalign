@@ -7,6 +7,13 @@
   highlight; file-local clip bounds and overlay duration metadata include the recovered audio.
   Alignment reports and WebVTT timestamps remain unchanged. Audio outside the first-to-last
   aligned range stays excluded to preserve excerpt behavior. Regenerate existing EPUBs to apply.
+- Fixed: overlapping sentence timings no longer replay audio. Millisecond-collapsed clips are
+  omitted and duration metadata uses the exact serialized file-local clocks. Invalid, nonfinite
+  or backward timing data and inconsistent track timelines fail with readable input errors.
+- Enhanced: `check` warns about forward gaps and backward jumps across clips and chapter
+  boundaries without rejecting intentional third-party discontinuities. It counts unique text
+  targets separately from audio clips, so splitting a sentence across files does not inflate
+  the reported sentence count.
 
 ## 1.3.0 - 2026-10-25
 

@@ -296,6 +296,14 @@ it, and any run that uses it records the restriction in the report's warnings.
   closing narration. Regenerate existing EPUBs to apply this fix.
 - The alignment report and WebVTT sidecars keep the original matched sentence times; only the
   EPUB playback clips are extended. Overlay `media:duration` includes the recovered audio.
+  Overlapping sentence timings are joined at the next sentence's start instead of replaying
+  audio. SMIL uses millisecond precision: collapsed boundaries do not create empty clips, and
+  duration metadata sums the exact serialized file-local clips. Invalid or backward alignment
+  timestamps fail with an input error rather than silently dropping audio.
+- `readalign check` warns about forward gaps and backward jumps between clips, including chapter
+  transitions in the same audio file. These are warnings, not failures, because third-party
+  books may intentionally omit or replay audio. It counts unique text targets as `sentences`
+  and reports `clips` separately; one text target can have several file-local playback clips.
 - Sentence splitting is tuned for English-style punctuation. Other languages align fine but may
   produce longer or shorter units than a native reader would choose.
 

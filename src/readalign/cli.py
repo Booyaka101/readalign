@@ -499,6 +499,10 @@ def _check_epub(path: str, *, probe_audio: bool) -> dict:
         max_clip_end: dict[str, float] = {}
         overlays = 0
         pars = 0
+        text_targets: set[tuple[str, str]] = set()
+        last_clip_end: dict[str, float] = {}
+        gaps: dict[str, float] = {}
+        backward_jumps: dict[str, float] = {}
         clip_total = 0.0
 
         for idref in spine:
@@ -546,6 +550,7 @@ def _check_epub(path: str, *, probe_audio: bool) -> dict:
                 src = text.get("src")
                 doc_path = _resolve(smil_path, src)
                 fragment = unquote(src.split("#", 1)[1]) if "#" in src else ""
+                text_targets.add((doc_path, fragment))
                 if doc_path != expected_document:
                     errors.append(f"{smil_path}: text points outside its associated document")
                 if manifested.get(doc_path) not in {"application/xhtml+xml", "image/svg+xml"}:
@@ -573,6 +578,15 @@ def _check_epub(path: str, *, probe_audio: bool) -> dict:
                     continue
                 if end <= begin:
                     errors.append(f"{smil_path}: clipEnd {end} is not after clipBegin {begin}")
+                else:
+                    previous_end = last_clip_end.get(audio_path)
+                    if previous_end is not None:
+                        delta = begin - previous_end
+                        if delta > 0.0005:
+                            gaps[audio_path] = gaps.get(audio_path, 0.0) + delta
+                        elif delta < -0.0005:
+                            backward_jumps[audio_path] = backward_jumps.get(audio_path, 0.0) - delta
+                    last_clip_end[audio_path] = end
                 overlay_clip += max(0.0, end - begin)
                 max_clip_end[audio_path] = max(max_clip_end.get(audio_path, 0.0), end)
             clip_total += overlay_clip
@@ -583,6 +597,14 @@ def _check_epub(path: str, *, probe_audio: bool) -> dict:
                     f"{overlay_clip:.3f}s"
                 )
 
+        # Third-party overlays may intentionally skip or replay audio. Diagnose
+        # discontinuities in spine order, including chapter boundaries, as warnings.
+        for audio_path, seconds in gaps.items():
+            warnings.append(f"{audio_path}: {seconds:.3f}s of unreferenced audio between clips")
+        for audio_path, seconds in backward_jumps.items():
+            warnings.append(
+                f"{audio_path}: backward jumps total {seconds:.3f}s; audio may be replayed"
+            )
         audio_durations = (
             _probe_clip_ends(archive, max_clip_end, errors, warnings)
             if probe_audio and max_clip_end
@@ -601,7 +623,8 @@ def _check_epub(path: str, *, probe_audio: bool) -> dict:
     return {
         "epub": os.path.abspath(path),
         "overlays": overlays,
-        "sentences": pars,
+        "sentences": len(text_targets),
+        "clips": pars,
         "clip_seconds": round(clip_total, 3),
         "declared_total": round(total_meta, 3) if total_meta is not None else None,
         "audio_durations": audio_durations,
@@ -620,6 +643,7 @@ def run_check(args) -> int:
     print(f"checking {findings['epub']}")
     print(f"  overlays       {findings['overlays']}")
     print(f"  sentences      {findings['sentences']}")
+    print(f"  audio clips    {findings['clips']}")
     print(f"  clip time      {findings['clip_seconds'] / 3600:.2f} hours")
     if findings["declared_total"] is not None:
         print(f"  media:duration {findings['declared_total'] / 3600:.2f} hours declared")
