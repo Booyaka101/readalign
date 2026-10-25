@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- New: `--audio-format mp3` stream-copies existing MP3 sources and transcodes other codecs
+  to MP3 for readers with AAC/Opus decoder limitations. The default `auto` retains the existing
+  behavior. Timing uses the prepared audio and the report records the selected format.
+- Fixed: streamed audiobook entries now declare their size before ZIP writing so large files
+  select ZIP64 headers instead of failing at the end of the write. Small entries retain their
+  existing archive format.
+- Added long-book packaging regressions and evidence-linked reader guidance distinguishing
+  codec support, large-track loading, sentence highlighting and narration-position restoration.
+
 ## 1.2.0 - 2026-10-22
 
 - New: `--report PATH` selects a separate JSON report for each batch build, with guards

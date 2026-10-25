@@ -1,11 +1,16 @@
 """Input discovery: patterns, directories, and the ordering between numbered files."""
 
+import shutil
+import subprocess
+
 import pytest
 
 from readalign.audio import (
     _chapters_from,
     _duration_of,
+    _output_plan,
     discover_inputs,
+    ffprobe,
     natural_key,
     prepare_tracks,
 )
@@ -75,3 +80,42 @@ def test_work_directory_cannot_overwrite_any_source_audio(tmp_path, monkeypatch)
     with pytest.raises(InputError, match="overwrite source audio"):
         prepare_tracks([str(source)], str(tmp_path), "96k", log=lambda *_: None)
     assert source.read_bytes() == b"original"
+
+
+@pytest.mark.parametrize("codec,container,expected", [
+    ("mp3", "mp3", (".mp3", "audio/mpeg", False)),
+    ("aac", "mov,mp4,m4a,3gp,3g2,mj2", (".m4a", "audio/mp4", False)),
+    ("opus", "ogg", (".opus", "audio/ogg; codecs=opus", False)),
+    ("flac", "flac", (".m4a", "audio/mp4", True)),
+])
+def test_output_format_defaults_preserve_existing_behavior(codec, container, expected):
+    probe = {"streams": [{"codec_type": "audio", "codec_name": codec}],
+             "format": {"format_name": container}}
+    assert _output_plan("source", probe) == expected
+    assert _output_plan("source", probe, "mp3") == (".mp3", "audio/mpeg", codec != "mp3")
+
+
+def test_unknown_audio_format_is_rejected(tmp_path):
+    with pytest.raises(InputError, match="audio format"):
+        prepare_tracks([], str(tmp_path), "96k", audio_format="wav")
+
+
+@pytest.mark.skipif(not (shutil.which("ffmpeg") and shutil.which("ffprobe")),
+                    reason="ffmpeg and ffprobe are needed")
+@pytest.mark.parametrize("source_codec,suffix", [("aac", ".m4a"), ("libmp3lame", ".mp3")])
+def test_mp3_mode_prepares_real_audio_without_changing_source(tmp_path, source_codec, suffix):
+    source = tmp_path / ("narration" + suffix)
+    subprocess.run([
+        "ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i",
+        "sine=frequency=440:duration=2", "-c:a", source_codec, str(source),
+    ], check=True)
+    original = source.read_bytes()
+    tracks = prepare_tracks([str(source)], str(tmp_path / "work"), "96k",
+                            log=lambda *_: None, audio_format="mp3")
+    track, = tracks
+    assert track.media_type == "audio/mpeg"
+    assert track.path.endswith(".mp3")
+    assert track.transcoded == (source_codec != "libmp3lame")
+    assert 1.9 < track.duration < 2.2
+    assert ffprobe(track.path)["streams"][0]["codec_name"] == "mp3"
+    assert source.read_bytes() == original

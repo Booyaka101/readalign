@@ -230,6 +230,7 @@ take precedence over this gate when more than one check fails.
 --beam-size N            whisper beam size (default: 5)
 --no-vad                 disable the voice-activity filter
 --audio-bitrate RATE     bitrate when audio has to be transcoded (default: 96k)
+--audio-format auto|mp3  preserve supported codecs (default: auto), or use MP3 for compatibility
 --verify [JAR]           validate the result with epubcheck after writing it (needs Java);
                          pass its jar path, or leave the value off to search PATH,
                          EPUBCHECK_HOME and JAVA_HOME for one
@@ -242,6 +243,20 @@ take precedence over this gate when more than one check fails.
 Multiple files are ordered by natural sort, so `part2.mp3` comes before `part10.mp3`. A single
 file covering the whole book is fine, and so is a chapter split over several files; readalign
 works from a continuous timeline and does not assume one file per chapter.
+
+For a reader that cannot decode AAC or Opus, select MP3 output:
+
+```
+readalign build --audio book.m4b --epub book.epub --out read-along.epub --audio-format mp3
+```
+
+Existing MP3 sources are stream-copied. Other codecs are re-encoded with ffmpeg's `libmp3lame`
+encoder at `--audio-bitrate` (default 96k). Re-encoding takes time and can reduce quality; it
+does not change your source files. Timings are measured against the prepared MP3, not the
+original AAC/Opus track. Changing the prepared audio also changes the transcript cache key,
+so the first build in this mode may need to transcribe again. The report records the requested
+`audio_format` and which source files were transcoded. This option does not fix reader resume
+bugs or split a long track into chapters.
 
 ### The optional refine pass
 
@@ -271,13 +286,50 @@ it, and any run that uses it records the restriction in the report's warnings.
 
 ## Reader support
 
-Media Overlays are part of EPUB 3, but support is uneven. Readium-based readers (Thorium Reader
-on desktop, Colibrio-based web readers) and Apple Books implement them. Kindle does not read EPUB
-overlays at all, and several popular mobile readers ignore the `media-overlay` attribute and just
-show the book. If a reader shows the text but plays no audio, it does not support overlays; the
-file is still a valid EPUB and still readable.
+Media Overlays are part of EPUB 3, but support is uneven. Text rendering, audio decoding,
+sentence highlighting and saving the narration position are separate capabilities. A silent
+book can mean an unsupported codec or a reader bug, not just missing overlay support.
 
-readalign's output is validated against epubcheck 5.2.1, and `readalign check` is validated
+### Compatibility evidence (October 25, 2026)
+
+This is a record of available evidence, **not a personally tested reader certification table**.
+Reader fixes merged upstream may not yet be in the version you have installed.
+
+| Reader / platform | Evidence and limits |
+| --- | --- |
+| Calibre and Thorium, reporter's PC | A [Readest reporter](https://github.com/readest/readest/issues/6989) says their large narrated EPUB plays in both. Versions and complete seek/reopen behavior were not recorded. |
+| Readest, web and desktop | [#7004](https://github.com/readest/readest/pull/7004) fixes loading a large stored audio entry without copying it all into memory. Upstream tested a 921 MB shared MP3, including an eight-hour seek. This is upstream testing, not a readalign reader test. |
+| Readest, Android and iOS | [#7010](https://github.com/readest/readest/pull/7010) and [#7019](https://github.com/readest/readest/pull/7019) extend direct audio access to native players. Upstream tests are described in those PRs; they do not establish playback of every readalign book. |
+| Readest, Linux app | The maintainer [reports no AAC decoder](https://github.com/readest/readest/issues/6989#issuecomment-6357568308). Try `--audio-format mp3`; updating for large-track fixes alone does not resolve that codec limitation. |
+| Episteme, Android | An [independent readalign-output user](https://github.com/Aryan-Raj3112/episteme/issues/579) reports narration restarting at the beginning of a long section after reopening. The same book highlights sentences correctly on PC. No readalign-side fix is established. |
+| Apple Books and other readers | Overlay support alone is not proof of long-track seeking or saved narration position. These behaviors have not been verified here. |
+| Kindle | EPUB Media Overlays are not supported. |
+
+### Long books and playback troubleshooting
+
+1. Run `readalign check read-along.epub` and, if available, epubcheck. A clean result checks
+   package structure and clip bounds, not whether a specific reader plays or resumes correctly.
+2. Check the reader version and audio codec. MP3 output is an option for AAC/Opus decoder
+   limitations; an EPUB can be valid while a reader cannot decode its narration.
+3. For large books, use a reader version containing its large-track fixes. readalign stores
+   prepared MP3/M4A/Opus entries without ZIP compression so readers can seek directly. A reader
+   may still extract or copy the whole track before playback. One overlay per content document
+   does not mean the audio is split into separate files. If you already own chapter-sized
+   narration files, pass their directory; they are naturally sorted.
+4. Test a later chapter, cross a chapter boundary, pause/resume, then close and reopen the book.
+   Saving the text position is not the same as saving the narration sentence and audio offset.
+   Re-encoding to MP3 is not a guaranteed workaround for narration-position loss.
+5. Compare the same EPUB in another overlay-capable reader. If only one reader fails, include
+   that comparison when reporting it rather than assuming the EPUB generation is defective.
+
+When reporting a problem, include readalign's version, reader version, OS/device, audio format,
+approximate track duration/size, the chapter and sentence where it happens, and whether it is
+startup, seeking, highlighting or reopening that fails. Include the output of `readalign check`
+and a short public-domain reproduction if possible. Reports and sidecars can contain local paths
+and quoted book text: inspect them before sharing. Do not upload a copyrighted book or narration
+unless you have permission.
+
+readalign's sample output is validated against epubcheck 5.2.1, and `readalign check` is validated
 against the reference Media Overlays title from the EPUB test suite at
 <https://epubtest.org/test-books>.
 
@@ -305,9 +357,12 @@ python -m pytest tests -q
 python -m ruff check .
 ```
 
-The suite runs in about a second and needs neither a GPU nor network access; it builds its own
+The suite needs neither a GPU nor network access; it builds its own
 EPUBs and synthesises word timings. A few cases need ffmpeg and skip without it, and one is
 skipped unless `READALIGN_MO_TESTBOOK` points at a copy of the epubtest.org Media Overlays book.
+Long-book packaging tests cover shared 16-hour timelines, separate-track clock resets, stored
+audio entries and ZIP64 selection using a lowered size threshold. Synthetic timings and a lowered
+threshold do not substitute for a real multi-gigabyte book or reader playback test.
 
 ## Distribution
 

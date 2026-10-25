@@ -79,6 +79,9 @@ def build_parser() -> argparse.ArgumentParser:
                        help="disable the voice-activity filter")
     build.add_argument("--audio-bitrate", default="96k",
                        help="bitrate used when audio has to be transcoded (default: 96k)")
+    build.add_argument("--audio-format", choices=["auto", "mp3"], default="auto",
+                       help="embedded audio format: auto preserves supported codecs; mp3 avoids "
+                            "AAC/Opus decoder limitations (default: auto)")
     build.add_argument("--verify", nargs="?", const="auto", default=None, metavar="EPUBCHECK",
                        help="validate the result with epubcheck after writing it (needs Java). "
                             "Pass its jar path, or leave the value off to search PATH, "
@@ -199,7 +202,8 @@ def run_build(args) -> int:
             wav_path = os.path.join(work_dir, "wav", f"part{index:03d}.wav")
             if any(same_path(wav_path, source) for source in [args.epub, *sources]):
                 raise InputError(f"the work directory would overwrite an input: {wav_path}")
-        tracks = prepare_tracks(sources, work_dir, args.audio_bitrate, log=log)
+        tracks = prepare_tracks(sources, work_dir, args.audio_bitrate, log=log,
+                                audio_format=args.audio_format)
         if args.dry_run:
             return _dry_run_plan(package, tracks, log)
 
@@ -279,6 +283,7 @@ def run_build(args) -> int:
             drift_threshold=args.drift_threshold,
             warnings=warnings,
             extras={"elapsed_seconds": round(time.monotonic() - started, 1),
+                    "audio_format": args.audio_format,
                     "token_match_gate": {
                         "threshold": args.min_token_match,
                         "passed": (result.matched_tokens / result.book_tokens

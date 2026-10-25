@@ -2,7 +2,7 @@
 
 The OPF gains the audio and overlay manifest items, the ``media-overlay`` attribute on every
 narrated content document, and the ``media:`` metadata EPUB 3.3 section 9.3.5 requires. The
-archive is written mimetype-first and uncompressed, as OCF demands.
+archive is written mimetype-first, with that entry stored as OCF demands.
 """
 
 from __future__ import annotations
@@ -284,7 +284,7 @@ def build_output(
 
 
 def write_epub(path: str, files: Member, original_order: list[str]) -> None:
-    """Write an OCF archive: mimetype first and stored, everything else deflated."""
+    """Write an OCF archive: mimetype first and stored, audio stored for direct seeking."""
     ordered: list[str] = []
     seen = set()
     for name in ["mimetype", "META-INF/container.xml", *original_order]:
@@ -323,6 +323,8 @@ def _write_archive(path: str, files: Member, ordered: list[str]) -> None:
             if isinstance(data, bytes):
                 archive.writestr(info, data)
             else:
+                # zipfile must reserve a ZIP64 header before streaming a large audiobook.
+                info.file_size = read.size(data)
                 with read.open(data) as source, archive.open(info, "w") as target:
                     shutil.copyfileobj(source, target, 1 << 20)
 

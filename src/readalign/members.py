@@ -60,11 +60,20 @@ class MemberReader(AbstractContextManager):
     def open(self, member: SourceFile | ArchiveMember) -> BinaryIO:
         if isinstance(member, SourceFile):
             return open(member.path, "rb")
-        archive = self._archives.get(member.epub_path)
+        return self._archive(member.epub_path).open(member.name)
+
+    def size(self, member: SourceFile | ArchiveMember) -> int:
+        """Read metadata, not content, so large entries can select ZIP64 before streaming."""
+        if isinstance(member, SourceFile):
+            return os.path.getsize(member.path)
+        return self._archive(member.epub_path).getinfo(member.name).file_size
+
+    def _archive(self, path: str) -> zipfile.ZipFile:
+        archive = self._archives.get(path)
         if archive is None:
-            archive = zipfile.ZipFile(member.epub_path)
-            self._archives[member.epub_path] = archive
-        return archive.open(member.name)
+            archive = zipfile.ZipFile(path)
+            self._archives[path] = archive
+        return archive
 
     def __exit__(self, *_) -> None:
         while self._archives:

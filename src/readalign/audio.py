@@ -199,10 +199,12 @@ def _chapters_from(probe: dict) -> list[Chapter]:
     return chapters
 
 
-def _output_plan(path: str, probe: dict) -> tuple[str, str, bool]:
+def _output_plan(path: str, probe: dict, audio_format: str = "auto") -> tuple[str, str, bool]:
     """Pick the extension, media type and whether a transcode is needed for a source file."""
     stream = _audio_stream(probe, path)
     codec = (stream.get("codec_name") or "").lower()
+    if audio_format == "mp3":
+        return ".mp3", "audio/mpeg", codec != "mp3"
     names = (probe.get("format", {}).get("format_name") or "").split(",")
     container = {name.strip() for name in names}
     if codec == "mp3":
@@ -214,13 +216,17 @@ def _output_plan(path: str, probe: dict) -> tuple[str, str, bool]:
     return ".m4a", "audio/mp4", True
 
 
-def prepare_tracks(sources: list[str], workdir: str, bitrate: str, log=print) -> list[AudioTrack]:
+def prepare_tracks(
+    sources: list[str], workdir: str, bitrate: str, log=print, *, audio_format: str = "auto",
+) -> list[AudioTrack]:
     """Copy or transcode every source into an EPUB core media type and measure the result.
 
     MP3, AAC-in-MP4 and Opus-in-Ogg are core media types in EPUB 3, so they are stream-copied.
     Anything else (FLAC, WAV, ALAC, WMA) is transcoded to AAC, because a reading system is not
-    required to play it.
+    required to play it. Explicit MP3 output avoids AAC/Opus decoder limitations in some readers.
     """
+    if audio_format not in {"auto", "mp3"}:
+        raise InputError("audio format must be auto or mp3")
     audio_dir = os.path.join(workdir, "audio")
     os.makedirs(audio_dir, exist_ok=True)
     tracks: list[AudioTrack] = []
@@ -228,15 +234,17 @@ def prepare_tracks(sources: list[str], workdir: str, bitrate: str, log=print) ->
     for index, source in enumerate(sources, start=1):
         probe = ffprobe(source)
         _reject_drm(source, probe)
-        suffix, media_type, transcode = _output_plan(source, probe)
+        suffix, media_type, transcode = _output_plan(source, probe, audio_format)
         target = os.path.join(audio_dir, f"part{index:03d}{suffix}")
         if any(same_path(target, original) for original in sources):
             raise InputError(f"the work directory would overwrite source audio: {target}")
         label = f"[{index}/{len(sources)}] {os.path.basename(source)}"
-        log(f"  {label} -> {'transcoding to AAC' if transcode else 'stream copy'}")
+        codec_label = "MP3" if suffix == ".mp3" else "AAC"
+        log(f"  {label} -> {'transcoding to ' + codec_label if transcode else 'stream copy'}")
         command = ["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", source,
                    "-map", "0:a:0", "-map_chapters", "0", "-vn"]
-        command += ["-c:a", "aac", "-b:a", bitrate] if transcode else ["-c:a", "copy"]
+        codec = "libmp3lame" if suffix == ".mp3" else "aac"
+        command += ["-c:a", codec, "-b:a", bitrate] if transcode else ["-c:a", "copy"]
         if suffix == ".m4a":
             command += ["-movflags", "+faststart"]
         result = _run([*command, target], f"preparing {source}")

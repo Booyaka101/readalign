@@ -1,6 +1,36 @@
 # readalign progress
 
-**State: 1.1.0 is released.** Everything in the brief is built, the suite is green, and both
+**Current state: 1.2.0 is released; October 25 compatibility work is unreleased.**
+
+## October 25 long-book compatibility
+
+- Investigated Readest #6989 and merged fixes #7004/#7010/#7019, plus Episteme #579.
+  Evidence points to reader large-track loading, Linux AAC decoding and Android saved narration
+  position; it does not establish a readalign timing defect. No copyrighted reporter book fetched.
+- Added opt-in `--audio-format mp3`, keeping the default codec-preserving behavior. MP3 inputs
+  are copied; other codecs use libmp3lame. Alignment still uses the prepared audio, the report
+  records the selection, and source files remain untouched.
+- Reproduced failure to stream entries above Python's ZIP64 threshold for both on-disk audio
+  and carried-through EPUB members. Fixed header selection by reading size metadata before
+  streaming. Regression tests lower the threshold instead of generating gigabytes of fixtures.
+- Added two 450-sentence chapters on shared 16-hour and separate-track timelines, checking
+  late clip clocks, sidecar clocks and stored audio. These are synthetic packaging tests, not
+  an actual long-book transcription or reader playback test.
+- Real public-domain Aesop test: converted the bundled MP3 to AAC, then built with MP3 output
+  and tiny.en on CPU. Timed 18/18 sentences at 95.1% token match and 0.00s max drift.
+  `readalign check` and epubcheck 5.2.1 found zero errors/warnings.
+- Full local suite with the reference Media Overlays EPUB: 176 passed, 1 skipped (Windows
+  symlink privilege). Ruff, wheel/sdist builds and twine checks pass. Small EPUB output is
+  byte-identical to the released writer for bytes, SourceFile and ArchiveMember inputs.
+- Evidence-linked compatibility and troubleshooting guidance lives in README.md, with explicit
+  reader-version/codec limits and privacy guidance for reports. Saved-position restoration,
+  real Android/iOS/desktop reader playback and real multi-gigabyte files remain unverified here.
+- Scratch verification artifacts: C:/Users/cbosc/AppData/Local/Temp/opencode/readalign-compat-1025.
+  No release, registry upload, reporter contact or community post authorized/performed in this pass.
+
+## Historical release notes
+
+**October 4 state: 1.1.0 released.** Everything in the brief is built, the suite is green, and both
 sample books build, validate and check out. A review pass after the release closed the first
 deferred item (escapability), fixed text that was silently never narrated, and cut the memory
 the loader and the checker use. A second pass fixed re-runs stacking stale audio and manifest
