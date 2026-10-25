@@ -246,7 +246,7 @@ works from a continuous timeline and does not assume one file per chapter.
 
 For a reader that cannot decode AAC or Opus, select MP3 output:
 
-**Unreleased:** `--audio-format` is not available in the published 1.2.0 package yet.
+The `--audio-format` option requires readalign 1.3.0 or later.
 
 ```
 readalign build --audio book.m4b --epub book.epub --out read-along.epub --audio-format mp3

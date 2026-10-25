@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.0 - 2026-10-25
 
 - Fixed: work-directory audio/WAV paths cannot overwrite the input ebook, output EPUB or
   report. Inputs must stay outside the generated sidecar directory when sidecars are enabled.

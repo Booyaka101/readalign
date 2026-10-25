@@ -1,6 +1,10 @@
 # readalign progress
 
-**Current state: 1.2.0 is released; October 25 compatibility work is unreleased.**
+**Current state: preparing 1.3.0 for the owner-authorized release.**
+
+The owner authorized merging, tagging, releasing and PyPI publication on October 25.
+Publication requires successful CI on the exact release commit. Prior notes below record
+the investigation-time boundaries; actual reader playback remains unverified.
 
 ## October 25 long-book compatibility
 
